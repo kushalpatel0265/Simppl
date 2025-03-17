@@ -197,7 +197,6 @@ else:
 st.sidebar.markdown("### Optional Features")
 show_topic_embedding = st.sidebar.checkbox("Topic Embedding Visualization")
 show_ts_genai_summary = st.sidebar.checkbox("GenAI Summary for Time Series")
-show_chatbot = st.sidebar.checkbox("Chatbot Query")
 show_offline_events = st.sidebar.checkbox("Offline Events (Wikipedia)")
 show_semantic_search = st.sidebar.checkbox("Semantic Search on Posts")
 
@@ -246,45 +245,6 @@ if show_ts_genai_summary:
             st.error("Error generating time series summary.")
     else:
         st.info("Time series data not available for summarization.")
-
-# ---------------------------------------------------------------------
-# (c) Chatbot Query: Answer questions about the data
-# ---------------------------------------------------------------------
-if show_chatbot:
-    st.markdown("## Chatbot Query")
-    user_question = st.text_input("Ask a question about trends, topics, or narratives:")
-    if user_question:
-        # Use regex to detect if the question is asking for top trending posts.
-        if re.search(r"top\s+10.*trending.*post", user_question, re.IGNORECASE):
-            # Try to use "score" or "num_comments" to determine trending posts.
-            if "score" in df.columns:
-                top_trending = df.sort_values(by="score", ascending=False).head(10)
-                metric = "score"
-            elif "num_comments" in df.columns:
-                top_trending = df.sort_values(by="num_comments", ascending=False).head(10)
-                metric = "number of comments"
-            else:
-                top_trending = None
-            if top_trending is not None:
-                answer_text = "Here are the top 10 trending posts based on {}:\n\n".format(metric)
-                for i, (_, row) in enumerate(top_trending.iterrows(), start=1):
-                    post_text = row.get(text_col, "No text available")
-                    snippet = post_text[:200].strip()  # first 200 characters
-                    answer_text += f"**Post {i}:** {snippet}...\n\n"
-                st.markdown("**Chatbot Answer:**")
-                st.write(answer_text)
-            else:
-                st.markdown("**Chatbot Answer:**")
-                st.write("Trending posts data not available in the dataset.")
-        else:
-            # Fallback: Use DialoGPT conversational pipeline for general queries.
-            chatbot = pipeline("conversational", model="microsoft/DialoGPT-medium")
-            from transformers import Conversation
-            conv = Conversation(user_question)
-            chatbot(conv)
-            answer = conv.generated_responses[-1] if conv.generated_responses else "Sorry, I could not generate a response."
-            st.markdown("**Chatbot Answer:**")
-            st.write(answer)
 
 # ---------------------------------------------------------------------
 # (d) Offline Events from Wikipedia for a Given Topic
@@ -363,5 +323,5 @@ else:
 st.markdown("### End of Dashboard")
 st.markdown("""
 This dashboard is a prototype implementation for analyzing Reddit social media data.  
-It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, a chatbot interface, offline event linking, and semantic search functionality.
+It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, offline event linking, and semantic search functionality.
 """)
