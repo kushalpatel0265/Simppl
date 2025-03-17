@@ -251,7 +251,7 @@ if show_ts_genai_summary:
 # ---------------------------------------------------------------------
 if show_offline_events:
     st.markdown("## Offline Events from Wikipedia")
-    wiki_topic = st.text_input("Enter a topic to fetch offline events (e.g., 'Russian invasion of Ukraine'):")
+    wiki_topic = st.text_input("Enter a topic to fetch offline events:")
     if wiki_topic:
         try:
             wiki_summary = wikipedia.summary(wiki_topic, sentences=5)
