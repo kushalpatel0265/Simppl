@@ -10,7 +10,11 @@ from pyvis.network import Network
 import streamlit.components.v1 as components
 
 # Transformers & Semantic Search
-from transformers import pipeline
+# Try to import pipeline from the submodule to avoid the import error
+try:
+    from transformers.pipelines import pipeline
+except ImportError:
+    from transformers import pipeline
 from sentence_transformers import SentenceTransformer, util
 import wikipedia  # For offline events summary
 from sklearn.feature_extraction.text import CountVectorizer
