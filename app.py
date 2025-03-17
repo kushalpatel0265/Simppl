@@ -251,7 +251,7 @@ if show_ts_genai_summary:
 # ---------------------------------------------------------------------
 if show_offline_events:
     st.markdown("## Offline Events from Wikipedia")
-    wiki_topic = st.text_input("Enter a topic to fetch offline events:")
+    wiki_topic = st.text_input("Enter a topic to fetch offline events (e.g., 'Russian invasion of Ukraine'):")
     if wiki_topic:
         try:
             wiki_summary = wikipedia.summary(wiki_topic, sentences=5)
@@ -283,7 +283,7 @@ if show_semantic_search:
             st.write("---")
 
 # ---------------------------------------------------------------------
-# (Optional) AI-Generated Summary on Posts (Existing Feature)
+# (Optional) AI-Generated Summary on Posts
 # ---------------------------------------------------------------------
 st.markdown("## AI-Generated Summary of Posts")
 if text_col in df.columns:
