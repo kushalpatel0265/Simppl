@@ -10,11 +10,11 @@ from pyvis.network import Network
 import streamlit.components.v1 as components
 
 # Transformers & Semantic Search
-# Try to import pipeline from the submodule to avoid the import error
 try:
     from transformers.pipelines import pipeline
 except ImportError:
     from transformers import pipeline
+
 from sentence_transformers import SentenceTransformer, util
 import wikipedia  # For offline events summary
 from sklearn.feature_extraction.text import CountVectorizer
@@ -24,6 +24,7 @@ from sklearn.manifold import TSNE
 # --------------------------------------------------------------------------------
 # ----------------------- Data Loading and Normalization -------------------------
 # --------------------------------------------------------------------------------
+
 @st.cache_data
 def load_raw_data(filepath):
     """Load the newline-delimited JSON file into a Pandas DataFrame."""
@@ -59,9 +60,10 @@ st.sidebar.write(df.columns.tolist())
 # --------------------------------------------------------------------------------
 # ------------------------- Column Mapping (Reddit Data) ---------------------------
 # --------------------------------------------------------------------------------
+
 # Typical Reddit fields:
 timestamp_col = "created_utc"  # Unix timestamp (in seconds)
-user_col = "author"            # Author
+user_col = "author"  # Author
 
 # For text, prefer "selftext" if available; otherwise, use "title".
 if "selftext" in df.columns and df["selftext"].notnull().sum() > 0:
@@ -93,6 +95,7 @@ if timestamp_col in df.columns:
 # --------------------------------------------------------------------------------
 # --------------------------- Sidebar: Filters & Platform --------------------------
 # --------------------------------------------------------------------------------
+
 st.sidebar.header("Filters & Platform")
 
 # Platform Selector (simulate multiple platforms)
@@ -125,6 +128,7 @@ if search_term:
 # --------------------------------------------------------------------------------
 # ------------------------- Main Dashboard: Basic Visualizations -----------------
 # --------------------------------------------------------------------------------
+
 st.title("Social Media Data Analysis Dashboard")
 st.markdown("""
 This dashboard visualizes Reddit data, showcasing trends over time, key contributors, topic embeddings, and more.
@@ -198,6 +202,7 @@ else:
 # ---------------------------- Optional Features ---------------------------------
 # Use sidebar checkboxes to toggle optional features
 # --------------------------------------------------------------------------------
+
 st.sidebar.markdown("### Optional Features")
 show_topic_embedding = st.sidebar.checkbox("Topic Embedding Visualization")
 show_ts_genai_summary = st.sidebar.checkbox("GenAI Summary for Time Series")
@@ -330,7 +335,7 @@ if text_col in df.columns:
     if sample_text:
         with st.spinner("Generating AI summary..."):
             final_summary = generate_summary(sample_text, summarizer, max_chunk_length=500)
-            st.write(final_summary)
+        st.write(final_summary)
     else:
         st.info("Not enough text data available for summarization.")
 else:
@@ -339,8 +344,21 @@ else:
 # --------------------------------------------------------------------------------
 # ------------------------------- End of Dashboard -------------------------------
 # --------------------------------------------------------------------------------
+
 st.markdown("### End of Dashboard")
 st.markdown("""
-This dashboard is a prototype implementation for analyzing Reddit social media data.  
+This dashboard is a prototype implementation for analyzing Reddit social media data. 
 It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, offline event linking, and semantic search functionality.
+""")
+
+# Footer
+st.markdown("© 2025 GitHub, Inc.")
+st.markdown("""
+* [Terms](https://docs.github.com)
+* [Privacy](https://docs.github.com)
+* [Security](#)
+* [Status](https://www.githubstatus.com)
+* [Docs](https://docs.github.com)
+* [Contact](https://support.github.com)
+* Manage cookies | Do not share my personal information
 """)
