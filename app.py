@@ -63,7 +63,7 @@ st.sidebar.write(df.columns.tolist())
 
 # Typical Reddit fields:
 timestamp_col = "created_utc"  # Unix timestamp (in seconds)
-user_col = "author"  # Author
+user_col = "author"            # Author
 
 # For text, prefer "selftext" if available; otherwise, use "title".
 if "selftext" in df.columns and df["selftext"].notnull().sum() > 0:
@@ -124,6 +124,14 @@ if search_term:
     if text_col in df.columns:
         df = df[df[text_col].str.contains(search_term, case=False, na=False)]
     st.sidebar.markdown(f"### Showing results for '{search_term}'")
+
+# --------------------------------------------------------------------------------
+# ---------------------- Optional: Clear Cache to Free Memory --------------------
+if st.sidebar.button("Clear Cache"):
+    st.legacy_caching.clear_cache()
+    st.experimental_memo.clear()
+    st.write("Cache cleared. You may need to refresh the page.")
+# --------------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------------
 # ------------------------- Main Dashboard: Basic Visualizations -----------------
@@ -245,6 +253,7 @@ if show_ts_genai_summary:
                        f"The highest activity was on {peak['date']} with {peak['count']} posts.")
         st.write("Time Series Description:")
         st.write(description)
+        # Heavy summarization loaded only if feature is enabled.
         ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
         try:
             ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
@@ -292,27 +301,25 @@ if show_semantic_search:
             st.write("---")
 
 # ---------------------------------------------------------------------
-# (Optional) AI-Generated Summary on Posts (Optimized for Speed)
+# (Optional) AI-Generated Summary on Posts (Optimized for Lower Memory)
 # ---------------------------------------------------------------------
 st.markdown("## AI-Generated Summary of Posts")
 if text_col in df.columns:
-    # Cache the summarizer so it loads only once.
-    # Using a lighter model to reduce processing time.
+    # Load a lighter summarizer only when needed.
     @st.cache_resource(show_spinner=False)
     def load_summarizer():
         return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     summarizer = load_summarizer()
 
     def generate_summary(text, summarizer, max_chunk_length=300):
-        # If text is short, summarize directly.
-        if len(text) <= max_chunk_length:
-            try:
+        # Limit the input text to a fixed maximum length to reduce processing.
+        text = text[:1000]  # only consider first 1000 characters
+        try:
+            # If text is short, summarize directly.
+            if len(text) <= max_chunk_length:
                 result = summarizer(text, max_length=50, min_length=25, do_sample=False)
                 return result[0]['summary_text']
-            except Exception as e:
-                return f"Error during summarization: {e}"
-        # Otherwise, break into chunks.
-        try:
+            # Otherwise, break into chunks.
             chunks = []
             current_chunk = ""
             for sentence in text.split('. '):
@@ -338,11 +345,11 @@ if text_col in df.columns:
         except Exception as e:
             return f"Error during summarization: {e}"
 
-    # Reduce the sample text to 1 post for efficiency
-    sample_text = df[text_col].dropna().sample(n=min(1, len(df)), random_state=42).iloc[0]
-    if sample_text:
+    # For efficiency, use a single post's text (and limit its length further)
+    sample_post = df[text_col].dropna().sample(n=1, random_state=42).iloc[0]
+    if sample_post:
         with st.spinner("Generating AI summary..."):
-            final_summary = generate_summary(sample_text, summarizer, max_chunk_length=300)
+            final_summary = generate_summary(sample_post, summarizer, max_chunk_length=300)
         st.write(final_summary)
     else:
         st.info("Not enough text data available for summarization.")
