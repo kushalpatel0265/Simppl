@@ -218,21 +218,28 @@ show_offline_events = st.sidebar.checkbox("Offline Events (Wikipedia)")
 show_semantic_search = st.sidebar.checkbox("Semantic Search on Posts")
 
 # ---------------------------------------------------------------------
-# (a) Topic Embedding Visualization using LDA + TSNE
+# (a) Topic Embedding Visualization using LDA + TSNE (Optimized)
 # ---------------------------------------------------------------------
 if show_topic_embedding:
     st.markdown("## Topic Embedding Visualization")
     if text_col in df.columns:
-        texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
-        vectorizer = CountVectorizer(stop_words='english', max_features=1000)
-        X = vectorizer.fit_transform(texts)
-        lda = LatentDirichletAllocation(n_components=5, random_state=42)
-        topic_matrix = lda.fit_transform(X)
-        dominant_topic = topic_matrix.argmax(axis=1)
-        tsne_model = TSNE(n_components=2, random_state=42)
-        tsne_values = tsne_model.fit_transform(topic_matrix)
-        tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
-        tsne_df["Dominant Topic"] = dominant_topic.astype(str)
+        # Use a smaller sample size (e.g., 100 texts) and cache the computation.
+        @st.cache_data
+        def compute_topic_embedding(texts):
+            vectorizer = CountVectorizer(stop_words='english', max_features=1000)
+            X = vectorizer.fit_transform(texts)
+            lda = LatentDirichletAllocation(n_components=5, random_state=42)
+            topic_matrix = lda.fit_transform(X)
+            dominant_topic = topic_matrix.argmax(axis=1)
+            tsne_model = TSNE(n_components=2, random_state=42)
+            tsne_values = tsne_model.fit_transform(topic_matrix)
+            tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
+            tsne_df["Dominant Topic"] = dominant_topic.astype(str)
+            return tsne_df
+
+        sample_texts = df[text_col].dropna().sample(n=min(100, len(df)), random_state=42).tolist()
+        with st.spinner("Computing topic embedding..."):
+            tsne_df = compute_topic_embedding(sample_texts)
         fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
                                 title="TSNE Embedding of Topics")
         st.plotly_chart(fig_topics)
@@ -253,7 +260,6 @@ if show_ts_genai_summary:
                        f"The highest activity was on {peak['date']} with {peak['count']} posts.")
         st.write("Time Series Description:")
         st.write(description)
-        # Heavy summarization loaded only if feature is enabled.
         ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
         try:
             ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
@@ -305,21 +311,18 @@ if show_semantic_search:
 # ---------------------------------------------------------------------
 st.markdown("## AI-Generated Summary of Posts")
 if text_col in df.columns:
-    # Load a lighter summarizer only when needed.
     @st.cache_resource(show_spinner=False)
     def load_summarizer():
         return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     summarizer = load_summarizer()
 
     def generate_summary(text, summarizer, max_chunk_length=300):
-        # Limit the input text to a fixed maximum length to reduce processing.
-        text = text[:1000]  # only consider first 1000 characters
+        # Limit input text to the first 1000 characters.
+        text = text[:1000]
         try:
-            # If text is short, summarize directly.
             if len(text) <= max_chunk_length:
                 result = summarizer(text, max_length=50, min_length=25, do_sample=False)
                 return result[0]['summary_text']
-            # Otherwise, break into chunks.
             chunks = []
             current_chunk = ""
             for sentence in text.split('. '):
@@ -345,7 +348,7 @@ if text_col in df.columns:
         except Exception as e:
             return f"Error during summarization: {e}"
 
-    # For efficiency, use a single post's text (and limit its length further)
+    # Use only one post's text (limited in length) for efficiency.
     sample_post = df[text_col].dropna().sample(n=1, random_state=42).iloc[0]
     if sample_post:
         with st.spinner("Generating AI summary..."):
