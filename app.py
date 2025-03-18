@@ -296,10 +296,11 @@ if show_semantic_search:
 # ---------------------------------------------------------------------
 st.markdown("## AI-Generated Summary of Posts")
 if text_col in df.columns:
-    # Cache the summarizer so it loads only once
+    # Cache the summarizer so it loads only once.
+    # Switching to a lighter model to reduce processing time.
     @st.cache_resource(show_spinner=False)
     def load_summarizer():
-        return pipeline("summarization", model="facebook/bart-large-cnn")
+        return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     summarizer = load_summarizer()
 
     def generate_summary(text, summarizer, max_chunk_length=500):
@@ -330,8 +331,8 @@ if text_col in df.columns:
         except Exception as e:
             return f"Error during summarization: {e}"
 
-    # Limit sample text to 5 posts for efficiency
-    sample_text = " ".join(df[text_col].dropna().sample(n=min(5, len(df)), random_state=42).tolist())
+    # Reduce the sample text to 3 posts for efficiency
+    sample_text = " ".join(df[text_col].dropna().sample(n=min(3, len(df)), random_state=42).tolist())
     if sample_text:
         with st.spinner("Generating AI summary..."):
             final_summary = generate_summary(sample_text, summarizer, max_chunk_length=500)
