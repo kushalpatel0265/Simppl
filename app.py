@@ -292,18 +292,26 @@ if show_semantic_search:
             st.write("---")
 
 # ---------------------------------------------------------------------
-# (Optional) AI-Generated Summary on Posts
+# (Optional) AI-Generated Summary on Posts (Optimized for Speed)
 # ---------------------------------------------------------------------
 st.markdown("## AI-Generated Summary of Posts")
 if text_col in df.columns:
     # Cache the summarizer so it loads only once.
-    # Switching to a lighter model to reduce processing time.
+    # Using a lighter model to reduce processing time.
     @st.cache_resource(show_spinner=False)
     def load_summarizer():
         return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     summarizer = load_summarizer()
 
-    def generate_summary(text, summarizer, max_chunk_length=500):
+    def generate_summary(text, summarizer, max_chunk_length=300):
+        # If text is short, summarize directly.
+        if len(text) <= max_chunk_length:
+            try:
+                result = summarizer(text, max_length=50, min_length=25, do_sample=False)
+                return result[0]['summary_text']
+            except Exception as e:
+                return f"Error during summarization: {e}"
+        # Otherwise, break into chunks.
         try:
             chunks = []
             current_chunk = ""
@@ -319,23 +327,22 @@ if text_col in df.columns:
             summaries = []
             for chunk in chunks:
                 if len(chunk) > 50:
-                    result = summarizer(chunk, max_length=100, min_length=30, do_sample=False)
-                    summary_chunk = result[0]['summary_text']
-                    summaries.append(summary_chunk)
+                    result = summarizer(chunk, max_length=50, min_length=25, do_sample=False)
+                    summaries.append(result[0]['summary_text'])
             if summaries:
-                combined_summary = " ".join(summaries)
-                final_summary = summarizer(combined_summary, max_length=100, min_length=30, do_sample=False)[0]['summary_text']
-                return final_summary
+                combined = " ".join(summaries)
+                final = summarizer(combined, max_length=50, min_length=25, do_sample=False)[0]['summary_text']
+                return final
             else:
                 return "Not enough content to summarize."
         except Exception as e:
             return f"Error during summarization: {e}"
 
-    # Reduce the sample text to 3 posts for efficiency
-    sample_text = " ".join(df[text_col].dropna().sample(n=min(3, len(df)), random_state=42).tolist())
+    # Reduce the sample text to 1 post for efficiency
+    sample_text = df[text_col].dropna().sample(n=min(1, len(df)), random_state=42).iloc[0]
     if sample_text:
         with st.spinner("Generating AI summary..."):
-            final_summary = generate_summary(sample_text, summarizer, max_chunk_length=500)
+            final_summary = generate_summary(sample_text, summarizer, max_chunk_length=300)
         st.write(final_summary)
     else:
         st.info("Not enough text data available for summarization.")
