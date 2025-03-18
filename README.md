@@ -1,6 +1,32 @@
 # SimPPL - Social Media Data Analysis Dashboard
 
+- **Name :** Kushal Patel
+- **Roll No. :** 22BCE255
+- **Nirma University**
+
+- **Demo Video Link :** [Demo Video](https://drive.google.com/file/d/1h8JCwVlwVyHMmnvGHuZw_K_nOLiDdLgu/view?usp=sharing)
+
 This project is an interactive dashboard built with Streamlit to analyze and visualize social media data, specifically Reddit data. It is designed to help you explore trends, sentiment, topics, and the connection between online discussions and offline events.
+
+## Screenshots
+
+![Dashboard Screenshot](Screenshots/1.png)
+![Dashboard Screenshot](Screenshots/2.png)
+![Dashboard Screenshot](Screenshots/3.png)
+![Dashboard Screenshot](Screenshots/4.png)
+![Dashboard Screenshot](Screenshots/5.png)
+![Dashboard Screenshot](Screenshots/6.png)
+![Dashboard Screenshot](Screenshots/7.png)
+![Dashboard Screenshot](Screenshots/8.png)
+![Dashboard Screenshot](Screenshots/9.png)
+![Dashboard Screenshot](Screenshots/10.png)
+![Dashboard Screenshot](Screenshots/11.png)
+![Dashboard Screenshot](Screenshots/12.png)
+![Dashboard Screenshot](Screenshots/13.png)
+![Dashboard Screenshot](Screenshots/14.png)
+![Dashboard Screenshot](Screenshots/15.png)
+![Dashboard Screenshot](Screenshots/16.png)
+![Dashboard Screenshot](Screenshots/17.png)
 
 ## Table of Contents
 
