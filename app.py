@@ -10,157 +10,175 @@ from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.manifold import TSNE
 
 # --------------------------------------------------------------------------------
-# ----------------------- Optimized Data Loading ----------------------------------
+# ----------------------- Data Loading and Normalization -------------------------
 # --------------------------------------------------------------------------------
-@st.cache_data(max_entries=1, show_spinner=False)
-def load_and_preprocess_data(filepath):
-    """Load data with memory optimization"""
+@st.cache_data
+def load_raw_data(filepath):
+    """Load the newline-delimited JSON file into a Pandas DataFrame."""
     try:
-        # Load in chunks if file is large
-        chunk_reader = pd.read_json(filepath, lines=True, chunksize=1000)
-        raw_df = pd.concat(chunk for chunk in chunk_reader)
-        
-        # Optimize memory usage
-        for col in raw_df.columns:
-            if raw_df[col].dtype == 'object':
-                raw_df[col] = raw_df[col].astype('category')
-        
-        # Normalize nested data
-        if 'data' in raw_df.columns:
-            df = pd.json_normalize(raw_df['data'])
-            raw_df = pd.concat([raw_df.drop('data', axis=1), df], axis=1)
-            
-        return raw_df
-    
+        raw_df = pd.read_json(filepath, lines=True)
+    except ValueError as e:
+        st.error("Error reading the JSONL file. Please check the file format.")
+        raise e
+    return raw_df
+
+DATA_PATH = "data.jsonl"
+if not os.path.exists(DATA_PATH):
+    st.error("data.jsonl file not found. Please ensure it is in the same directory as this app.")
+else:
+    raw_df = load_raw_data(DATA_PATH)
+
+st.sidebar.markdown("### Raw Dataset Columns")
+st.sidebar.write(raw_df.columns.tolist())
+
+# Normalize the nested "data" column if present
+if 'data' in raw_df.columns:
+    try:
+        df = pd.json_normalize(raw_df['data'])
     except Exception as e:
-        st.error(f"Data loading failed: {str(e)}")
-        return pd.DataFrame()
+        st.error("Error normalizing the 'data' column.")
+        df = raw_df
+else:
+    df = raw_df
+
+st.sidebar.markdown("### Normalized Data Columns")
+st.sidebar.write(df.columns.tolist())
 
 # --------------------------------------------------------------------------------
-# ----------------------- Main App with Resource Management ----------------------
+# ------------------------- Column Mapping (Reddit Data) -------------------------
 # --------------------------------------------------------------------------------
-def main():
-    st.set_page_config(layout="wide", page_icon="📊")
-    
-    # Load data
-    DATA_PATH = "data.jsonl"
-    if not os.path.exists(DATA_PATH):
-        st.error("Missing data.jsonl file")
-        return
-    
-    with st.spinner("Optimizing data loading..."):
-        df = load_and_preprocess_data(DATA_PATH)
-    
-    # ----------------------------------------------------------------------------
-    # ------------------------- Safe Data Filtering ------------------------------
-    # ----------------------------------------------------------------------------
-    st.sidebar.header("Filters")
-    
-    # Date filter
-    if "created_utc" in df.columns:
-        df["created_utc"] = pd.to_datetime(df["created_utc"], errors='coerce', unit='s')
-        df = df.dropna(subset=["created_utc"])
-        
-        min_date = df["created_utc"].min().date()
-        max_date = df["created_utc"].max().date()
-        
-        date_range = st.sidebar.date_input(
-            "Select date range",
-            [min_date, max_date],
-            min_value=min_date,
-            max_value=max_date
-        )
-        
-        if len(date_range) == 2:
-            df = df[
-                (df["created_utc"].dt.date >= date_range[0]) & 
-                (df["created_utc"].dt.date <= date_range[1])
-            ]
+timestamp_col = "created_utc"  # Unix timestamp (in seconds)
+user_col = "author"            # Author
 
-    # Text filter
-    search_term = st.sidebar.text_input("Search posts:")
-    if search_term:
-        df = df[df["selftext"].str.contains(search_term, case=False, na=False)]
+# Text column handling
+if "selftext" in df.columns and df["selftext"].notnull().sum() > 0:
+    text_col = "selftext"
+elif "title" in df.columns:
+    text_col = "title"
+else:
+    text_col = None
 
-    # ----------------------------------------------------------------------------
-    # -------------------- Memory-Optimized Visualizations -----------------------
-    # ----------------------------------------------------------------------------
-    st.title("Social Media Analytics Dashboard")
-    
-    # Summary metrics
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Posts", len(df))
-        
-    with col2:
-        if "author" in df.columns:
-            st.metric("Unique Users", df["author"].nunique())
+# Hashtag extraction
+if "hashtags" not in df.columns:
+    def extract_hashtags(row):
+        text = ""
+        if "title" in row and pd.notnull(row["title"]):
+            text += row["title"] + " "
+        if "selftext" in row and pd.notnull(row["selftext"]):
+            text += row["selftext"]
+        return re.findall(r"#\w+", text)
+    df["hashtags"] = df.apply(extract_hashtags, axis=1)
+hashtags_col = "hashtags"
 
-    # Time series plot
-    if "created_utc" in df.columns:
-        with st.expander("Posts Over Time", expanded=True):
-            time_series = df.set_index("created_utc").resample('D').size()
-            fig = px.line(time_series, title="Daily Post Count")
-            st.plotly_chart(fig, use_container_width=True)
+# Timestamp conversion
+if timestamp_col in df.columns:
+    try:
+        df[timestamp_col] = pd.to_datetime(df[timestamp_col], unit='s')
+    except Exception as e:
+        st.error(f"Error converting timestamp. Check the format of '{timestamp_col}'.")
 
-    # Sentiment analysis
-    if "selftext" in df.columns:
-        with st.expander("Sentiment Analysis", expanded=True):
-            # Process in chunks
-            sentiment_chunks = []
-            chunk_size = 500
-            
-            for i in range(0, len(df), chunk_size):
-                chunk = df["selftext"].iloc[i:i+chunk_size]
-                sentiment_chunks.extend([
-                    TextBlob(text).sentiment.polarity 
-                    for text in chunk if isinstance(text, str)
-                ])
-                
-            fig = px.histogram(
-                x=sentiment_chunks, 
-                nbins=30, 
-                title="Sentiment Distribution"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+# --------------------------------------------------------------------------------
+# --------------------------- Sidebar: Filters & Platform ------------------------
+# --------------------------------------------------------------------------------
+st.sidebar.header("Filters & Platform")
 
-    # Topic modeling (safer implementation)
-    if "selftext" in df.columns:
-        with st.expander("Topic Modeling", expanded=False):
-            # Limit to 1000 posts for stability
-            sample_texts = df["selftext"].dropna().sample(
-                n=min(1000, len(df)), 
-                random_state=42
-            ).tolist()
-            
-            with st.spinner("Processing topics (this may take a minute)..."):
-                try:
-                    vectorizer = CountVectorizer(
-                        stop_words='english', 
-                        max_features=500  # Reduced features
-                    )
-                    X = vectorizer.fit_transform(sample_texts)
-                    
-                    lda = LatentDirichletAllocation(
-                        n_components=3,  # Fewer components
-                        learning_method='online',  # Memory-efficient
-                        random_state=42
-                    )
-                    lda.fit(X)
-                    
-                    # Reduced t-SNE dimensions
-                    tsne = TSNE(n_components=2, perplexity=15)
-                    embeddings = tsne.fit_transform(lda.transform(X))
-                    
-                    fig = px.scatter(
-                        x=embeddings[:, 0], 
-                        y=embeddings[:, 1],
-                        title="Topic Clusters"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                except Exception as e:
-                    st.error(f"Topic modeling failed: {str(e)}")
+# Platform selector
+platform = st.sidebar.selectbox("Select Platform", ["Reddit", "Twitter", "Facebook"])
+if platform != "Reddit":
+    st.sidebar.info(f"Data for {platform} is not available. Showing Reddit data.")
 
-if __name__ == "__main__":
-    main()
+# Date filter
+if timestamp_col in df.columns:
+    try:
+        min_date = df[timestamp_col].min().date()
+        max_date = df[timestamp_col].max().date()
+        start_date = st.sidebar.date_input("Start date", min_date, min_value=min_date, max_value=max_date)
+        end_date = st.sidebar.date_input("End date", max_date, min_value=min_date, max_value=max_date)
+        if start_date > end_date:
+            st.sidebar.error("Error: End date must fall after start date.")
+        df = df[(df[timestamp_col].dt.date >= start_date) & (df[timestamp_col].dt.date <= end_date)]
+    except Exception as e:
+        st.sidebar.error("Error processing the timestamp column for filtering.")
+else:
+    st.sidebar.info(f"No '{timestamp_col}' column found for filtering by date.")
+
+# Keyword search
+search_term = st.sidebar.text_input("Search for a keyword/hashtag:")
+if search_term:
+    if text_col in df.columns:
+        df = df[df[text_col].str.contains(search_term, case=False, na=False)]
+    st.sidebar.markdown(f"### Showing results for '{search_term}'")
+
+# --------------------------------------------------------------------------------
+# ------------------------- Main Dashboard Visualizations ------------------------
+# --------------------------------------------------------------------------------
+st.title("Social Media Data Analysis Dashboard")
+st.markdown("This dashboard visualizes Reddit data with core analytical features.")
+
+# Summary metrics
+total_posts = len(df)
+st.markdown("### Summary Metrics")
+st.write("**Total Posts:**", total_posts)
+if user_col in df.columns:
+    unique_users = df[user_col].nunique()
+    st.write("**Unique Users:**", unique_users)
+
+# Time series plot
+if timestamp_col in df.columns:
+    st.markdown("### Posts Over Time with Moving Average")
+    df["date"] = df[timestamp_col].dt.date
+    time_series = df.groupby("date").size().reset_index(name="count")
+    time_series["7-day Moving Avg"] = time_series["count"].rolling(window=7).mean()
+    fig_time = px.line(time_series, x="date", y=["count", "7-day Moving Avg"],
+                       labels={"date": "Date", "value": "Posts"},
+                       title="Posts Over Time with 7-day Moving Average")
+    st.plotly_chart(fig_time)
+
+# Top contributors pie chart
+community_col = "subreddit" if "subreddit" in df.columns else user_col
+if community_col in df.columns:
+    st.markdown("### Top Communities/Accounts")
+    contributions = df[community_col].value_counts().reset_index()
+    contributions.columns = [community_col, "count"]
+    fig_pie = px.pie(contributions.head(10), values="count", names=community_col,
+                     title="Top 10 Contributors")
+    st.plotly_chart(fig_pie)
+
+# Hashtag analysis
+if hashtags_col in df.columns:
+    st.markdown("### Top Hashtags")
+    hashtags_exploded = df.explode(hashtags_col)
+    hashtags_exploded = hashtags_exploded[hashtags_exploded[hashtags_col] != ""]
+    top_hashtags = hashtags_exploded[hashtags_col].value_counts().reset_index()
+    top_hashtags.columns = ['hashtag', 'count']
+    if not top_hashtags.empty:
+        fig_hashtags = px.bar(top_hashtags.head(10), x='hashtag', y='count',
+                              title="Top 10 Hashtags")
+        st.plotly_chart(fig_hashtags)
+
+# Sentiment analysis
+if text_col is not None and text_col in df.columns:
+    st.markdown("### Sentiment Analysis")
+    df['sentiment'] = df[text_col].apply(lambda x: TextBlob(x).sentiment.polarity if isinstance(x, str) else 0)
+    fig_sentiment = px.histogram(df, x='sentiment', nbins=30,
+                                 title="Sentiment Distribution")
+    st.plotly_chart(fig_sentiment)
+
+# Topic modeling visualization
+if text_col in df.columns:
+    st.markdown("## Topic Embedding Visualization")
+    texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
+    vectorizer = CountVectorizer(stop_words='english', max_features=1000)
+    X = vectorizer.fit_transform(texts)
+    lda = LatentDirichletAllocation(n_components=5, random_state=42)
+    topic_matrix = lda.fit_transform(X)
+    dominant_topic = topic_matrix.argmax(axis=1)
+    tsne_model = TSNE(n_components=2, random_state=42)
+    tsne_values = tsne_model.fit_transform(topic_matrix)
+    tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
+    tsne_df["Dominant Topic"] = dominant_topic.astype(str)
+    fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
+                            title="Topic Clusters")
+    st.plotly_chart(fig_topics)
+
+st.markdown("### End of Dashboard")
