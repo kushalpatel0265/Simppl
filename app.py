@@ -122,9 +122,7 @@ if search_term:
 # ------------------------- Main Dashboard: Basic Visualizations ------------------
 # --------------------------------------------------------------------------------
 st.title("Social Media Data Analysis Dashboard")
-st.markdown("""
-This dashboard visualizes Reddit data, showcasing trends over time, key contributors, topic embeddings, and more.
-""")
+st.markdown("""This dashboard visualizes Reddit data, showcasing trends over time, key contributors, topic embeddings, and more.""")
 
 # Summary Metrics
 total_posts = len(df)
@@ -152,76 +150,7 @@ if timestamp_col in df.columns:
 else:
     st.info("No timestamp data available for time series plot.")
 
-# Pie Chart of Top Contributors (using subreddit if available, otherwise author)
-community_col = "subreddit" if "subreddit" in df.columns else user_col
-if community_col in df.columns:
-    st.markdown("### Top Communities/Accounts Contributions")
-    contributions = df[community_col].value_counts().reset_index()
-    contributions.columns = [community_col, "count"]
-    top_contributions = contributions.head(10)
-    fig_pie = px.pie(top_contributions, values="count", names=community_col,
-                     title="Top 10 Contributors")
-    st.plotly_chart(fig_pie)
-else:
-    st.info("No community or account data available for contributor pie chart.")
-
-# Top Hashtags Bar Chart
-if hashtags_col in df.columns:
-    st.markdown("### Top Hashtags")
-    hashtags_exploded = df.explode(hashtags_col)
-    hashtags_exploded = hashtags_exploded[hashtags_exploded[hashtags_col] != ""]
-    top_hashtags = hashtags_exploded[hashtags_col].value_counts().reset_index()
-    top_hashtags.columns = ['hashtag', 'count']
-    if not top_hashtags.empty:
-        fig_hashtags = px.bar(top_hashtags.head(10), x='hashtag', y='count',
-                              labels={'hashtag': 'Hashtag', 'count': 'Frequency'},
-                              title="Top 10 Hashtags")
-        st.plotly_chart(fig_hashtags)
-    else:
-        st.info("No hashtag data available.")
-else:
-    st.info("No 'hashtags' column found in the dataset.")
-
-# Sentiment Analysis on Text Data
-if text_col is not None and text_col in df.columns:
-    st.markdown("### Sentiment Analysis")
-    df['sentiment'] = df[text_col].apply(lambda x: TextBlob(x).sentiment.polarity if isinstance(x, str) else 0)
-    fig_sentiment = px.histogram(df, x='sentiment', nbins=30,
-                                 labels={'sentiment': 'Sentiment Polarity'},
-                                 title="Sentiment Polarity Distribution")
-    st.plotly_chart(fig_sentiment)
-else:
-    st.info(f"No '{text_col}' column available for sentiment analysis.")
-
-# --------------------------------------------------------------------------------
-# ---------------------------- Advanced Features (Now Always On) -----------------
-# --------------------------------------------------------------------------------
-
-# (a) Topic Embedding Visualization using LDA + TSNE
-st.markdown("## Topic Embedding Visualization")
-if text_col in df.columns:
-    texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
-    vectorizer = CountVectorizer(stop_words='english', max_features=1000)
-    X = vectorizer.fit_transform(texts)
-
-    lda = LatentDirichletAllocation(n_components=5, random_state=42)
-    topic_matrix = lda.fit_transform(X)
-
-    dominant_topic = topic_matrix.argmax(axis=1)
-    tsne_model = TSNE(n_components=2, random_state=42)
-    tsne_values = tsne_model.fit_transform(topic_matrix)
-    tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
-    tsne_df["Dominant Topic"] = dominant_topic.astype(str)
-
-    fig_topics = px.scatter(
-        tsne_df, x="x", y="y", color="Dominant Topic",
-        title="TSNE Embedding of Topics"
-    )
-    st.plotly_chart(fig_topics)
-else:
-    st.info("No text data available for topic embedding.")
-
-# (b) GenAI Summary for Time Series Plot
+# GenAI Summary for Time Series Plot
 st.markdown("## GenAI Summary for Time Series")
 if timestamp_col in df.columns and not df.empty:
     time_series = df.groupby(df[timestamp_col].dt.date).size().reset_index(name="count")
@@ -249,44 +178,6 @@ if timestamp_col in df.columns and not df.empty:
 else:
     st.info("No timestamp data available for time series summary.")
 
-# (c) Offline Events from Wikipedia for a Given Topic
-st.markdown("## Offline Events from Wikipedia")
-wiki_topic = st.text_input("Enter a topic to fetch offline events (e.g., 'Russian invasion of Ukraine'):")
-if wiki_topic:
-    try:
-        wiki_summary = wikipedia.summary(wiki_topic, sentences=5)
-        st.markdown(f"**Wikipedia Summary for '{wiki_topic}':**")
-        st.write(wiki_summary)
-    except Exception as e:
-        st.error("Error retrieving Wikipedia data. Please check the topic name.")
-
-# (d) Semantic Search on Posts using Sentence Transformers
-st.markdown("## Semantic Search on Posts")
-search_query = st.text_input("Enter your semantic search query:")
-if search_query and text_col in df.columns:
-    @st.cache_data
-    def get_post_embeddings(texts):
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        return model.encode(texts, convert_to_tensor=True)
-
-    posts = df[text_col].dropna().tolist()
-    embeddings = get_post_embeddings(posts)
-    query_embedding = SentenceTransformer("all-MiniLM-L6-v2").encode(search_query, convert_to_tensor=True)
-    cos_scores = util.cos_sim(query_embedding, embeddings)[0]
-    top_results = cos_scores.topk(5)
-
-    st.markdown("**Top Matching Posts:**")
-    for score, idx in zip(top_results.values, top_results.indices):
-        st.write(f"Score: {score.item():.3f}")
-        st.write(posts[idx])
-        st.write("---")
-
-# --------------------------------------------------------------------------------
 # ------------------------------- End of Dashboard --------------------------------
-# --------------------------------------------------------------------------------
 st.markdown("### End of Dashboard")
-st.markdown("""
-This dashboard is a prototype implementation for analyzing Reddit social media data.  
-It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, 
-offline event linking, and semantic search functionality.
-""")
+st.markdown("""This dashboard is a prototype implementation for analyzing Reddit social media data. It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, offline event linking, and semantic search functionality.""")
