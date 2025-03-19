@@ -139,13 +139,16 @@ else:
 # Time Series Plot with 7-day Moving Average
 if timestamp_col in df.columns:
     st.markdown("### Posts Over Time with Moving Average")
-    df["date"] = df[timestamp_col].dt.date
-    time_series = df.groupby("date").size().reset_index(name="count")
-    time_series["7-day Moving Avg"] = time_series["count"].rolling(window=7).mean()
-    fig_time = px.line(time_series, x="date", y=["count", "7-day Moving Avg"],
-                       labels={"date": "Date", "value": "Number of Posts"},
-                       title="Posts Over Time with 7-day Moving Average")
-    st.plotly_chart(fig_time)
+    df["date"] = df[timestamp_col].dt.date  # Ensure date is extracted from timestamp
+    if "date" not in df.columns:
+        st.error("Error: 'date' column not found after timestamp conversion.")
+    else:
+        time_series = df.groupby("date").size().reset_index(name="count")
+        time_series["7-day Moving Avg"] = time_series["count"].rolling(window=7).mean()
+        fig_time = px.line(time_series, x="date", y=["count", "7-day Moving Avg"],
+                           labels={"date": "Date", "value": "Number of Posts"},
+                           title="Posts Over Time with 7-day Moving Average")
+        st.plotly_chart(fig_time)
 else:
     st.info("No timestamp data available for time series plot.")
 
