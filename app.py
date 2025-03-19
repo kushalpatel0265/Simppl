@@ -5,17 +5,6 @@ import os
 import re
 from datetime import datetime
 from textblob import TextBlob
-import networkx as nx
-from pyvis.network import Network
-import streamlit.components.v1 as components
-
-# Transformers & Semantic Search
-from transformers import pipeline
-from sentence_transformers import SentenceTransformer, util
-import wikipedia  # For offline events summary
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.decomposition import LatentDirichletAllocation
-from sklearn.manifold import TSNE
 
 # --------------------------------------------------------------------------------
 # ----------------------- Data Loading and Normalization -------------------------
@@ -53,7 +42,7 @@ st.sidebar.markdown("### Normalized Data Columns")
 st.sidebar.write(df.columns.tolist())
 
 # --------------------------------------------------------------------------------
-# ------------------------- Column Mapping (Reddit Data) -------------------------
+# ------------------------- Column Mapping (Reddit Data) ---------------------------
 # --------------------------------------------------------------------------------
 # Typical Reddit fields:
 timestamp_col = "created_utc"  # Unix timestamp (in seconds)
@@ -87,7 +76,7 @@ if timestamp_col in df.columns:
         st.error(f"Error converting timestamp. Check the format of '{timestamp_col}'.")
 
 # --------------------------------------------------------------------------------
-# --------------------------- Sidebar: Filters & Platform -------------------------
+# --------------------------- Sidebar: Filters & Platform --------------------------
 # --------------------------------------------------------------------------------
 st.sidebar.header("Filters & Platform")
 
@@ -119,10 +108,12 @@ if search_term:
     st.sidebar.markdown(f"### Showing results for '{search_term}'")
 
 # --------------------------------------------------------------------------------
-# ------------------------- Main Dashboard: Basic Visualizations ------------------
+# ------------------------- Main Dashboard: Basic Visualizations -----------------
 # --------------------------------------------------------------------------------
 st.title("Social Media Data Analysis Dashboard")
-st.markdown("""This dashboard visualizes Reddit data, showcasing trends over time, key contributors, topic embeddings, and more.""")
+st.markdown("""
+This dashboard visualizes Reddit data, showcasing trends over time, key contributors, topic embeddings, and more.
+""")
 
 # Summary Metrics
 total_posts = len(df)
@@ -137,47 +128,62 @@ else:
 # Time Series Plot with 7-day Moving Average
 if timestamp_col in df.columns:
     st.markdown("### Posts Over Time with Moving Average")
-    df["date"] = df[timestamp_col].dt.date  # Ensure date is extracted from timestamp
-    if "date" not in df.columns:
-        st.error("Error: 'date' column not found after timestamp conversion.")
-    else:
-        time_series = df.groupby("date").size().reset_index(name="count")
-        time_series["7-day Moving Avg"] = time_series["count"].rolling(window=7).mean()
-        fig_time = px.line(time_series, x="date", y=["count", "7-day Moving Avg"],
-                           labels={"date": "Date", "value": "Number of Posts"},
-                           title="Posts Over Time with 7-day Moving Average")
-        st.plotly_chart(fig_time)
+    df["date"] = df[timestamp_col].dt.date
+    time_series = df.groupby("date").size().reset_index(name="count")
+    time_series["7-day Moving Avg"] = time_series["count"].rolling(window=7).mean()
+    fig_time = px.line(time_series, x="date", y=["count", "7-day Moving Avg"],
+                       labels={"date": "Date", "value": "Number of Posts"},
+                       title="Posts Over Time with 7-day Moving Average")
+    st.plotly_chart(fig_time)
 else:
     st.info("No timestamp data available for time series plot.")
 
-# GenAI Summary for Time Series Plot
-st.markdown("## GenAI Summary for Time Series")
-if timestamp_col in df.columns and not df.empty:
-    time_series = df.groupby(df[timestamp_col].dt.date).size().reset_index(name="count")
-    if not time_series.empty:
-        start = time_series["date"].min()
-        end = time_series["date"].max()
-        avg_posts = time_series["count"].mean()
-        peak = time_series.loc[time_series["count"].idxmax()]
-        description = (
-            f"From {start} to {end}, the average number of posts per day was {avg_posts:.1f}. "
-            f"The highest activity was on {peak['date']} with {peak['count']} posts."
-        )
-        st.write("Time Series Description:")
-        st.write(description)
-
-        ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-        try:
-            ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
-            st.markdown("**GenAI Summary:**")
-            st.write(ts_summary)
-        except Exception as e:
-            st.error("Error generating time series summary.")
-    else:
-        st.info("Time series data not available for summarization.")
+# Pie Chart of Top Contributors (using subreddit if available, otherwise author)
+community_col = "subreddit" if "subreddit" in df.columns else user_col
+if community_col in df.columns:
+    st.markdown("### Top Communities/Accounts Contributions")
+    contributions = df[community_col].value_counts().reset_index()
+    contributions.columns = [community_col, "count"]
+    top_contributions = contributions.head(10)
+    fig_pie = px.pie(top_contributions, values="count", names=community_col,
+                     title="Top 10 Contributors")
+    st.plotly_chart(fig_pie)
 else:
-    st.info("No timestamp data available for time series summary.")
+    st.info("No community or account data available for contributor pie chart.")
 
-# ------------------------------- End of Dashboard --------------------------------
+# Top Hashtags Bar Chart
+if hashtags_col in df.columns:
+    st.markdown("### Top Hashtags")
+    hashtags_exploded = df.explode(hashtags_col)
+    hashtags_exploded = hashtags_exploded[hashtags_exploded[hashtags_col] != ""]
+    top_hashtags = hashtags_exploded[hashtags_col].value_counts().reset_index()
+    top_hashtags.columns = ['hashtag', 'count']
+    if not top_hashtags.empty:
+        fig_hashtags = px.bar(top_hashtags.head(10), x='hashtag', y='count',
+                              labels={'hashtag': 'Hashtag', 'count': 'Frequency'},
+                              title="Top 10 Hashtags")
+        st.plotly_chart(fig_hashtags)
+    else:
+        st.info("No hashtag data available.")
+else:
+    st.info("No 'hashtags' column found in the dataset.")
+
+# Sentiment Analysis on Text Data
+if text_col is not None and text_col in df.columns:
+    st.markdown("### Sentiment Analysis")
+    df['sentiment'] = df[text_col].apply(lambda x: TextBlob(x).sentiment.polarity if isinstance(x, str) else 0)
+    fig_sentiment = px.histogram(df, x='sentiment', nbins=30,
+                                 labels={'sentiment': 'Sentiment Polarity'},
+                                 title="Sentiment Polarity Distribution")
+    st.plotly_chart(fig_sentiment)
+else:
+    st.info(f"No '{text_col}' column available for sentiment analysis.")
+
+# --------------------------------------------------------------------------------
+# ------------------------------- End of Dashboard -------------------------------
+# --------------------------------------------------------------------------------
 st.markdown("### End of Dashboard")
-st.markdown("""This dashboard is a prototype implementation for analyzing Reddit social media data. It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, offline event linking, and semantic search functionality.""")
+st.markdown("""
+This dashboard is a prototype implementation for analyzing Reddit social media data.  
+It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, offline event linking, and semantic search functionality.
+""")
