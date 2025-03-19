@@ -272,23 +272,23 @@ else:
 # ---------------------------------------------------------------------
 # (f) Semantic Search on Posts using Sentence Transformers
 # ---------------------------------------------------------------------
-st.markdown("## Semantic Search on Posts")
-search_query = st.text_input("Enter your semantic search query:")
-if search_query and text_col in df.columns:
-    @st.cache_data
-    def get_post_embeddings(texts):
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        return model.encode(texts, convert_to_tensor=True)
-    posts = df[text_col].dropna().tolist()
-    embeddings = get_post_embeddings(posts)
-    query_embedding = SentenceTransformer("all-MiniLM-L6-v2").encode(search_query, convert_to_tensor=True)
-    cos_scores = util.cos_sim(query_embedding, embeddings)[0]
-    top_results = cos_scores.topk(5)
-    st.markdown("**Top Matching Posts:**")
-    for score, idx in zip(top_results.values, top_results.indices):
-        st.write(f"Score: {score.item():.3f}")
-        st.write(posts[idx])
-        st.write("---")
+# st.markdown("## Semantic Search on Posts")
+# search_query = st.text_input("Enter your semantic search query:")
+# if search_query and text_col in df.columns:
+#     @st.cache_data
+#     def get_post_embeddings(texts):
+#         model = SentenceTransformer("all-MiniLM-L6-v2")
+#         return model.encode(texts, convert_to_tensor=True)
+#     posts = df[text_col].dropna().tolist()
+#     embeddings = get_post_embeddings(posts)
+#     query_embedding = SentenceTransformer("all-MiniLM-L6-v2").encode(search_query, convert_to_tensor=True)
+#     cos_scores = util.cos_sim(query_embedding, embeddings)[0]
+#     top_results = cos_scores.topk(5)
+#     st.markdown("**Top Matching Posts:**")
+#     for score, idx in zip(top_results.values, top_results.indices):
+#         st.write(f"Score: {score.item():.3f}")
+#         st.write(posts[idx])
+#         st.write("---")
 
 # --------------------------------------------------------------------------------
 # ------------------------------- End of Dashboard -------------------------------
