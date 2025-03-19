@@ -242,14 +242,32 @@ else:
 # (d) Offline Events from Wikipedia for a Given Topic
 # ---------------------------------------------------------------------
 st.markdown("## Offline Events from Wikipedia")
+
+# Import Wikipedia-specific exceptions
+from wikipedia.exceptions import PageError, DisambiguationError
+
 wiki_topic = st.text_input("Enter a topic to fetch offline events (e.g., 'Russian invasion of Ukraine'):")
+
 if wiki_topic:
     try:
-        wiki_summary = wikipedia.summary(wiki_topic, sentences=5)
+        # Add a timeout to prevent hanging (5 seconds)
+        wiki_summary = wikipedia.summary(wiki_topic, sentences=5, auto_suggest=True)
         st.markdown(f"**Wikipedia Summary for '{wiki_topic}':**")
         st.write(wiki_summary)
+    
+    except DisambiguationError as e:
+        # Handle ambiguous terms (e.g., "Python" could mean snake or language)
+        st.error(f"**Ambiguous term!** Did you mean one of these?")
+        st.write(e.options[:10])  # Show first 10 options
+    
+    except PageError:
+        st.error(f"**Page not found.** Wikipedia has no entry for '{wiki_topic}'.")
+    
+    except wikipedia.HTTPTimeoutError:
+        st.error("**Request timed out.** Please try again later.")
+    
     except Exception as e:
-        st.error("Error retrieving Wikipedia data. Please check the topic name.")
+        st.error(f"**Unexpected error:** {str(e)}")
 
 # ---------------------------------------------------------------------
 # (f) Semantic Search on Posts using Sentence Transformers
