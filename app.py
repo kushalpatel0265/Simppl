@@ -218,38 +218,54 @@ else:
 # ---------------------------------------------------------------------
 # (b) GenAI Summary for Time Series Plot
 ---------------------------------------------------------------------
-st.markdown("## GenAI Summary for Time Series")
-if not time_series.empty:
-    start = time_series["date"].min()
-    end = time_series["date"].max()
-    avg_posts = time_series["count"].mean()
-    peak = time_series.loc[time_series["count"].idxmax()]
-    description = (f"From {start} to {end}, the average number of posts per day was {avg_posts:.1f}. "
-                   f"The highest activity was on {peak['date']} with {peak['count']} posts.")
-    st.write("Time Series Description:")
-    st.write(description)
-    ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-    try:
-        ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
-        st.markdown("**GenAI Summary:**")
-        st.write(ts_summary)
-    except Exception as e:
-        st.error("Error generating time series summary.")
-else:
-    st.info("Time series data not available for summarization.")
+# st.markdown("## GenAI Summary for Time Series")
+# if not time_series.empty:
+#     start = time_series["date"].min()
+#     end = time_series["date"].max()
+#     avg_posts = time_series["count"].mean()
+#     peak = time_series.loc[time_series["count"].idxmax()]
+#     description = (f"From {start} to {end}, the average number of posts per day was {avg_posts:.1f}. "
+#                    f"The highest activity was on {peak['date']} with {peak['count']} posts.")
+#     st.write("Time Series Description:")
+#     st.write(description)
+#     ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+#     try:
+#         ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
+#         st.markdown("**GenAI Summary:**")
+#         st.write(ts_summary)
+#     except Exception as e:
+#         st.error("Error generating time series summary.")
+# else:
+#     st.info("Time series data not available for summarization.")
 
 # ---------------------------------------------------------------------
 # (d) Offline Events from Wikipedia for a Given Topic
 # ---------------------------------------------------------------------
 st.markdown("## Offline Events from Wikipedia")
 wiki_topic = st.text_input("Enter a topic to fetch offline events (e.g., 'Russian invasion of Ukraine'):")
+
 if wiki_topic:
     try:
-        wiki_summary = wikipedia.summary(wiki_topic, sentences=5)
-        st.markdown(f"**Wikipedia Summary for '{wiki_topic}':**")
+        # Handle disambiguation and page errors
+        wiki_page = wikipedia.page(wiki_topic, auto_suggest=True)
+        wiki_summary = wikipedia.summary(wiki_topic, sentences=3, auto_suggest=True)
+        st.markdown(f"**Wikipedia Summary for '{wiki_page.title}':**")
         st.write(wiki_summary)
+        st.markdown(f"**URL:** {wiki_page.url}")
+        
+    except wikipedia.DisambiguationError as e:
+        st.error(f"**Ambiguous topic!** Choose one of these options:")
+        for option in e.options[:5]:  # Show first 5 options to avoid flooding
+            st.write(f"- {option}")
+            
+    except wikipedia.PageError:
+        st.error(f"Wikipedia page for '{wiki_topic}' not found.")
+        
+    except wikipedia.WikipediaException as e:
+        st.error(f"Wikipedia API error: {str(e)}")
+        
     except Exception as e:
-        st.error("Error retrieving Wikipedia data. Please check the topic name.")
+        st.error(f"Error fetching data: {str(e)}")
 
 # ---------------------------------------------------------------------
 # (f) Semantic Search on Posts using Sentence Transformers
