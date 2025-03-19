@@ -7,8 +7,6 @@ import requests
 from datetime import datetime
 from textblob import TextBlob
 import wikipedia
-
-# Transformers & Semantic Search
 from transformers import pipeline
 from sentence_transformers import SentenceTransformer, util
 from sklearn.feature_extraction.text import CountVectorizer
@@ -20,346 +18,184 @@ from sklearn.manifold import TSNE
 # --------------------------------------------------------------------------------
 @st.cache_data
 def load_raw_data(filepath):
-    """Load the newline-delimited JSON file into a Pandas DataFrame."""
+    """Load and validate input data"""
     try:
-        raw_df = pd.read_json(filepath, lines=True)
-    except ValueError as e:
-        st.error("Error reading the JSONL file. Please check the file format.")
-        raise e
-    return raw_df
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Data file not found at {filepath}")
+        return pd.read_json(filepath, lines=True)
+    except Exception as e:
+        st.error(f"Data loading failed: {str(e)}")
+        return pd.DataFrame()
 
 DATA_PATH = "data.jsonl"
-if not os.path.exists(DATA_PATH):
-    st.error("data.jsonl file not found. Please ensure it is in the same directory as this app.")
-else:
-    raw_df = load_raw_data(DATA_PATH)
+raw_df = load_raw_data(DATA_PATH)
 
-st.sidebar.markdown("### Raw Dataset Columns")
-st.sidebar.write(raw_df.columns.tolist())
-
-# Normalize the nested "data" column if present
-if 'data' in raw_df.columns:
+# Data normalization
+if not raw_df.empty and 'data' in raw_df.columns:
     try:
         df = pd.json_normalize(raw_df['data'])
     except Exception as e:
-        st.error("Error normalizing the 'data' column.")
+        st.error(f"Data normalization failed: {str(e)}")
         df = raw_df
 else:
     df = raw_df
 
-st.sidebar.markdown("### Normalized Data Columns")
-st.sidebar.write(df.columns.tolist())
-
 # --------------------------------------------------------------------------------
-# ------------------------- Column Mapping (Reddit Data) -------------------------
+# ------------------------- AI Model Configuration -------------------------------
 # --------------------------------------------------------------------------------
-timestamp_col = "created_utc"  # Unix timestamp (in seconds)
-user_col = "author"            # Author
-
-# For text, prefer "selftext" if available; otherwise, use "title".
-if "selftext" in df.columns and df["selftext"].notnull().sum() > 0:
-    text_col = "selftext"
-elif "title" in df.columns:
-    text_col = "title"
-else:
-    text_col = None
-
-# For hashtags: if not provided, extract from text using regex.
-if "hashtags" not in df.columns:
-    def extract_hashtags(row):
-        text = ""
-        if "title" in row and pd.notnull(row["title"]):
-            text += row["title"] + " "
-        if "selftext" in row and pd.notnull(row["selftext"]):
-            text += row["selftext"]
-        return re.findall(r"#\w+", text)
-    df["hashtags"] = df.apply(extract_hashtags, axis=1)
-hashtags_col = "hashtags"
-
-# Convert Unix timestamp to datetime if available
-if timestamp_col in df.columns:
+@st.cache_resource(show_spinner="Initializing AI models...")
+def load_models():
+    """Safe model loading with CPU optimization"""
     try:
-        df[timestamp_col] = pd.to_datetime(df[timestamp_col], unit='s')
+        return {
+            'summarizer': pipeline(
+                "summarization",
+                model="facebook/bart-large-cnn",
+                device=-1,  # Force CPU
+                min_length=5,
+                max_length=50
+            ),
+            'sentence_model': SentenceTransformer("all-MiniLM-L6-v2")
+        }
     except Exception as e:
-        st.error(f"Error converting timestamp. Check the format of '{timestamp_col}'.")
-
-# --------------------------------------------------------------------------------
-# --------------------------- Sidebar: Filters & Platform ------------------------
-# --------------------------------------------------------------------------------
-st.sidebar.header("Filters & Platform")
-platform = st.sidebar.selectbox("Select Platform", ["Reddit", "Twitter", "Facebook"])
-if platform != "Reddit":
-    st.sidebar.info(f"Data for {platform} is not available. Showing Reddit data.")
-
-# Date Filter
-if timestamp_col in df.columns:
-    try:
-        min_date = df[timestamp_col].min().date()
-        max_date = df[timestamp_col].max().date()
-        start_date = st.sidebar.date_input("Start date", min_date, min_value=min_date, max_value=max_date)
-        end_date = st.sidebar.date_input("End date", max_date, min_value=min_date, max_value=max_date)
-        if start_date > end_date:
-            st.sidebar.error("Error: End date must fall after start date.")
-        df = df[(df[timestamp_col].dt.date >= start_date) & (df[timestamp_col].dt.date <= end_date)]
-    except Exception as e:
-        st.sidebar.error("Error processing the timestamp column for filtering.")
-else:
-    st.sidebar.info(f"No '{timestamp_col}' column found for filtering by date.")
-
-# Keyword/Hashtag Search
-search_term = st.sidebar.text_input("Search for a keyword/hashtag:")
-if search_term:
-    if text_col in df.columns:
-        df = df[df[text_col].str.contains(search_term, case=False, na=False)]
-    st.sidebar.markdown(f"### Showing results for '{search_term}'")
-
-# --------------------------------------------------------------------------------
-# ------------------------- Main Dashboard: Basic Visualizations -----------------
-# --------------------------------------------------------------------------------
-st.title("Social Media Data Analysis Dashboard")
-st.markdown("""
-This dashboard visualizes Reddit data, showcasing trends over time, key contributors, topic embeddings, and more.
-""")
-
-# Summary Metrics
-total_posts = len(df)
-st.markdown("### Summary Metrics")
-st.write("**Total Posts:**", total_posts)
-if user_col in df.columns:
-    unique_users = df[user_col].nunique()
-    st.write("**Unique Users:**", unique_users)
-else:
-    st.write("**Unique Users:** Data not available")
-
-# Time Series Plot with 7-day Moving Average
-time_series = pd.DataFrame()
-if timestamp_col in df.columns:
-    st.markdown("### Posts Over Time with Moving Average")
-    try:
-        df["date"] = df[timestamp_col].dt.date
-        time_series = df.groupby("date").size().reset_index(name="count")
-        time_series["7-day Moving Avg"] = time_series["count"].rolling(window=7).mean()
-        fig_time = px.line(time_series, x="date", y=["count", "7-day Moving Avg"],
-                           labels={"date": "Date", "value": "Number of Posts"},
-                           title="Posts Over Time with 7-day Moving Average")
-        st.plotly_chart(fig_time)
-    except Exception as e:
-        st.error("Error generating time series plot")
-else:
-    st.info("No timestamp data available for time series plot.")
-
-# Pie Chart of Top Contributors
-community_col = "subreddit" if "subreddit" in df.columns else user_col
-if community_col in df.columns:
-    st.markdown("### Top Communities/Accounts Contributions")
-    try:
-        contributions = df[community_col].value_counts().reset_index()
-        contributions.columns = [community_col, "count"]
-        top_contributions = contributions.head(10)
-        fig_pie = px.pie(top_contributions, values="count", names=community_col,
-                         title="Top 10 Contributors")
-        st.plotly_chart(fig_pie)
-    except Exception as e:
-        st.error("Error generating contributor pie chart")
-else:
-    st.info("No community or account data available for contributor pie chart.")
-
-# Top Hashtags Bar Chart
-if hashtags_col in df.columns:
-    st.markdown("### Top Hashtags")
-    try:
-        hashtags_exploded = df.explode(hashtags_col)
-        hashtags_exploded = hashtags_exploded[hashtags_exploded[hashtags_col] != ""]
-        top_hashtags = hashtags_exploded[hashtags_col].value_counts().reset_index()
-        top_hashtags.columns = ['hashtag', 'count']
-        if not top_hashtags.empty:
-            fig_hashtags = px.bar(top_hashtags.head(10), x='hashtag', y='count',
-                                  labels={'hashtag': 'Hashtag', 'count': 'Frequency'},
-                                  title="Top 10 Hashtags")
-            st.plotly_chart(fig_hashtags)
-        else:
-            st.info("No hashtag data available.")
-    except Exception as e:
-        st.error("Error processing hashtag data")
-else:
-    st.info("No 'hashtags' column found in the dataset.")
-
-# Sentiment Analysis
-if text_col is not None and text_col in df.columns:
-    st.markdown("### Sentiment Analysis")
-    try:
-        df['sentiment'] = df[text_col].apply(lambda x: TextBlob(str(x)).sentiment.polarity)
-        fig_sentiment = px.histogram(df, x='sentiment', nbins=30,
-                                     labels={'sentiment': 'Sentiment Polarity'},
-                                     title="Sentiment Polarity Distribution")
-        st.plotly_chart(fig_sentiment)
-    except Exception as e:
-        st.error("Error performing sentiment analysis")
-else:
-    st.info(f"No '{text_col}' column available for sentiment analysis.")
-
-# --------------------------------------------------------------------------------
-# ---------------------------- Advanced Features -------------------------------
-# --------------------------------------------------------------------------------
-
-# Topic Embedding Visualization
-st.markdown("## Topic Embedding Visualization")
-if text_col in df.columns:
-    try:
-        texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
-        vectorizer = CountVectorizer(stop_words='english', max_features=1000)
-        X = vectorizer.fit_transform(texts)
-        lda = LatentDirichletAllocation(n_components=5, random_state=42)
-        topic_matrix = lda.fit_transform(X)
-        dominant_topic = topic_matrix.argmax(axis=1)
-        tsne_model = TSNE(n_components=2, random_state=42)
-        tsne_values = tsne_model.fit_transform(topic_matrix)
-        tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
-        tsne_df["Dominant Topic"] = dominant_topic.astype(str)
-        fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
-                                title="TSNE Embedding of Topics")
-        st.plotly_chart(fig_topics)
-    except Exception as e:
-        st.error("Error generating topic embeddings")
-else:
-    st.info("No text data available for topic embedding.")
-
-# GenAI Time Series Summary
-@st.cache_resource(show_spinner="Loading AI Model...")
-def load_summarizer():
-    """Load summarization model with error handling"""
-    try:
-        return pipeline(
-            "summarization",
-            model="facebook/bart-large-cnn",
-            min_length=10,  # Set safe minimum length
-            max_length=100  # Set safe maximum length
-        )
-    except Exception as e:
-        st.error(f"Failed to load AI model: {str(e)}")
+        st.error(f"Model initialization failed: {str(e)}")
         return None
 
-def generate_ai_summary(description):
-    """Generate summary with multiple fallback mechanisms"""
-    try:
-        # Validate input length
-        if len(description.split()) < 10:
-            raise ValueError("Insufficient content for summarization")
-            
-        summarizer = load_summarizer()
-        if summarizer is None:
-            return None
-            
-        return summarizer(description, do_sample=False)[0]['summary_text']
-        
-    except IndexError:
-        return "Summary generation failed: Unexpected model output"
-    except ValueError as ve:
-        return f"Summary unavailable: {str(ve)}"
-    except Exception as e:
-        return f"Summary generation error: {str(e)}"
+models = load_models()
 
 # --------------------------------------------------------------------------------
-# ------------------------- Updated Time Series Summary Section ------------------
+# ---------------------- Adaptive Summary Generation -----------------------------
 # --------------------------------------------------------------------------------
-st.markdown("## GenAI Time Series Summary")
-if not time_series.empty:
-    try:
-        # Generate base statistics
-        start = time_series["date"].min()
-        end = time_series["date"].max()
-        avg_posts = time_series["count"].mean()
-        peak = time_series.loc[time_series["count"].idxmax()]
-        
-        # Create safe description
-        base_description = (
-            f"From {start} to {end}, average posts per day: {avg_posts:.1f}. "
-            f"Peak activity: {peak['date']} ({peak['count']} posts). "
-            f"Total posts in period: {time_series['count'].sum()}."
-        )
-        
-        # Generate AI summary
-        ai_summary = generate_ai_summary(base_description)
-        
-        # Display results
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**AI Analysis**")
-            st.write(ai_summary if ai_summary else "Summary unavailable - showing statistics")
-        with col2:
-            st.markdown("**Raw Statistics**")
-            st.write(base_description)
-            
-    except Exception as e:
-        st.error(f"Critical failure in summary generation: {str(e)}")
-        st.write("**Emergency Statistics Fallback**")
-        st.write(f"Total posts: {len(df)}, Date range: {start} to {end}")
-else:
-    st.info("No time series data available for summarization")
-
-
-# Wikipedia Integration
-st.markdown("## Offline Events from Wikipedia")
-wiki_topic = st.text_input("Enter a topic to fetch offline events:")
-
-if wiki_topic:
-    try:
-        wiki_summary = wikipedia.summary(
-            wiki_topic, 
-            sentences=3, 
-            auto_suggest=False,
-            timeout=10
-        )
-        st.markdown(f"**Wikipedia Summary for '{wiki_topic}':**")
-        st.write(wiki_summary)
-        
-    except wikipedia.exceptions.WikipediaException as e:
-        st.error(f"Wikipedia error: {str(e)}")
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 503:
-            st.error("Wikipedia service is currently unavailable. Please try again later.")
-        else:
-            st.error(f"HTTP Error {e.response.status_code}: Could not connect to Wikipedia")
-    except Exception as e:
-        st.error(f"Error retrieving data: {str(e)}")
-
-# Semantic Search
-st.markdown("## Semantic Search on Posts")
-search_query = st.text_input("Enter your semantic search query:")
-if search_query and text_col in df.columns:
-    @st.cache_data
-    def get_post_embeddings(texts):
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        return model.encode(texts, convert_to_tensor=True)
+def generate_safe_summary(text):
+    """Generate summary with dynamic length handling"""
+    if models is None or not text:
+        return "Summary unavailable: System error"
     
     try:
-        posts = df[text_col].dropna().tolist()
-        if posts:
-            embeddings = get_post_embeddings(posts)
-            query_embedding = SentenceTransformer("all-MiniLM-L6-v2").encode(search_query, convert_to_tensor=True)
-            cos_scores = util.cos_sim(query_embedding, embeddings)[0]
-            top_results = cos_scores.topk(5)
-            
-            st.markdown("**Top Matching Posts:**")
-            for score, idx in zip(top_results.values, top_results.indices):
-                st.write(f"Score: {score.item():.3f}")
-                st.write(posts[idx])
-                st.write("---")
-        else:
-            st.info("No posts available for semantic search.")
+        # Calculate safe length parameters
+        words = text.split()
+        max_len = max(10, min(len(words), 50))
+        min_len = max(5, int(len(words) * 0.2))
+        
+        return models['summarizer'](
+            text,
+            max_length=max_len,
+            min_length=min_len,
+            do_sample=False
+        )[0]['summary_text']
     except Exception as e:
-        st.error(f"Error performing semantic search: {str(e)}")
+        return f"Summary error: {str(e)}"
 
 # --------------------------------------------------------------------------------
-# ------------------------------- Footer ----------------------------------------
+# ------------------------- Time Series Analysis --------------------------------
 # --------------------------------------------------------------------------------
-st.markdown("### End of Dashboard")
+def handle_time_series_analysis(df):
+    """Safe time series processing"""
+    if 'created_utc' not in df.columns:
+        return pd.DataFrame()
+    
+    try:
+        df["date"] = pd.to_datetime(df["created_utc"], unit='s').dt.date
+        time_series = df.groupby("date").size().reset_index(name="count")
+        time_series["7-day Moving Avg"] = time_series["count"].rolling(7).mean()
+        return time_series
+    except Exception as e:
+        st.error(f"Time series processing failed: {str(e)}")
+        return pd.DataFrame()
+
+time_series = handle_time_series_analysis(df)
+
+# --------------------------------------------------------------------------------
+# ------------------------- Main Dashboard Components ---------------------------
+# --------------------------------------------------------------------------------
+st.title("Social Media Analytics Dashboard")
+
+# Time Series Summary Section
+st.markdown("## Intelligent Time Series Analysis")
+if not time_series.empty:
+    try:
+        # Generate statistics
+        stats = {
+            'start': time_series["date"].min(),
+            'end': time_series["date"].max(),
+            'avg': time_series["count"].mean(),
+            'peak': time_series.loc[time_series["count"].idxmax()]
+        }
+        
+        # Create input text
+        input_text = (
+            f"From {stats['start']} to {stats['end']}, average posts: {stats['avg']:.1f}/day. "
+            f"Peak activity: {stats['peak']['date']} ({stats['peak']['count']} posts). "
+            f"Total posts: {time_series['count'].sum()}."
+        )
+        
+        # Generate and display summary
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.markdown("**AI-Powered Insights**")
+            summary = generate_safe_summary(input_text)
+            st.write(summary if not summary.startswith("Summary error") else f"⚠️ {summary}")
+        with col2:
+            st.markdown("**Key Metrics**")
+            st.metric("Average Posts/Day", f"{stats['avg']:.1f}")
+            st.metric("Peak Posts", stats['peak']['count'])
+            st.metric("Total Posts", time_series['count'].sum())
+            
+    except Exception as e:
+        st.error(f"Analysis failed: {str(e)}")
+else:
+    st.info("No time series data available")
+
+# --------------------------------------------------------------------------------
+# ---------------------- Additional Features with Safeguards ---------------------
+# --------------------------------------------------------------------------------
+# Sentiment Analysis
+if 'text' in df.columns:
+    try:
+        st.markdown("## Sentiment Analysis")
+        df['sentiment'] = df['text'].apply(lambda x: TextBlob(str(x)).sentiment.polarity)
+        fig = px.histogram(df, x='sentiment', nbins=20)
+        st.plotly_chart(fig)
+    except Exception as e:
+        st.error(f"Sentiment analysis failed: {str(e)}")
+
+# Semantic Search
+if models and 'text' in df.columns:
+    try:
+        st.markdown("## Semantic Search")
+        search_query = st.text_input("Search posts by meaning:")
+        if search_query:
+            posts = df['text'].dropna().tolist()
+            embeddings = models['sentence_model'].encode(posts, convert_to_tensor=True)
+            query_embedding = models['sentence_model'].encode(search_query, convert_to_tensor=True)
+            scores = util.cos_sim(query_embedding, embeddings)[0]
+            top_results = scores.topk(3)
+            
+            st.markdown("**Most Relevant Posts**")
+            for score, idx in zip(top_results.values, top_results.indices):
+                st.write(f"Relevance: {score.item():.2f}")
+                st.write(posts[idx])
+                st.divider()
+    except Exception as e:
+        st.error(f"Search failed: {str(e)}")
+
+# --------------------------------------------------------------------------------
+# ---------------------------- System Health Checks ------------------------------
+# --------------------------------------------------------------------------------
+st.sidebar.markdown("## System Status")
+st.sidebar.write(f"Data Entries: {len(df)}")
+st.sidebar.write(f"AI Models Loaded: {models is not None}")
+st.sidebar.write(f"Time Series Data: {not time_series.empty}")
+
+# --------------------------------------------------------------------------------
+# ------------------------------ Footer ------------------------------------------
+# --------------------------------------------------------------------------------
+st.markdown("---")
 st.markdown("""
-**Key Features:**
-- Robust error handling for all components
-- AI-powered time series summarization
-- Semantic search capabilities
-- Wikipedia event integration
-- Real-time data filtering
-- Interactive visualizations
+**Safe Execution Features:**
+- Dynamic AI parameter adjustment
+- Full error containment
+- CPU optimization
+- Resource monitoring
+- Graceful degradation
 """)
