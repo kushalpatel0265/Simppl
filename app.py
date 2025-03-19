@@ -5,6 +5,17 @@ import os
 import re
 from datetime import datetime
 from textblob import TextBlob
+import networkx as nx
+from pyvis.network import Network
+import streamlit.components.v1 as components
+
+# Transformers & Semantic Search
+from transformers import pipeline
+from sentence_transformers import SentenceTransformer, util
+import wikipedia  # For offline events summary
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.decomposition import LatentDirichletAllocation
+from sklearn.manifold import TSNE
 
 # --------------------------------------------------------------------------------
 # ----------------------- Data Loading and Normalization -------------------------
@@ -178,6 +189,88 @@ if text_col is not None and text_col in df.columns:
     st.plotly_chart(fig_sentiment)
 else:
     st.info(f"No '{text_col}' column available for sentiment analysis.")
+
+# --------------------------------------------------------------------------------
+# ---------------------------- Compulsory Features -------------------------------
+# --------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
+# (a) Topic Embedding Visualization using LDA + TSNE
+# ---------------------------------------------------------------------
+st.markdown("## Topic Embedding Visualization")
+if text_col in df.columns:
+    texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
+    vectorizer = CountVectorizer(stop_words='english', max_features=1000)
+    X = vectorizer.fit_transform(texts)
+    lda = LatentDirichletAllocation(n_components=5, random_state=42)
+    topic_matrix = lda.fit_transform(X)
+    dominant_topic = topic_matrix.argmax(axis=1)
+    tsne_model = TSNE(n_components=2, random_state=42)
+    tsne_values = tsne_model.fit_transform(topic_matrix)
+    tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
+    tsne_df["Dominant Topic"] = dominant_topic.astype(str)
+    fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
+                            title="TSNE Embedding of Topics")
+    st.plotly_chart(fig_topics)
+else:
+    st.info("No text data available for topic embedding.")
+
+# ---------------------------------------------------------------------
+# (b) GenAI Summary for Time Series Plot
+# ---------------------------------------------------------------------
+st.markdown("## GenAI Summary for Time Series")
+if not time_series.empty:
+    start = time_series["date"].min()
+    end = time_series["date"].max()
+    avg_posts = time_series["count"].mean()
+    peak = time_series.loc[time_series["count"].idxmax()]
+    description = (f"From {start} to {end}, the average number of posts per day was {avg_posts:.1f}. "
+                   f"The highest activity was on {peak['date']} with {peak['count']} posts.")
+    st.write("Time Series Description:")
+    st.write(description)
+    ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    try:
+        ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
+        st.markdown("**GenAI Summary:**")
+        st.write(ts_summary)
+    except Exception as e:
+        st.error("Error generating time series summary.")
+else:
+    st.info("Time series data not available for summarization.")
+
+# ---------------------------------------------------------------------
+# (d) Offline Events from Wikipedia for a Given Topic
+# ---------------------------------------------------------------------
+st.markdown("## Offline Events from Wikipedia")
+wiki_topic = st.text_input("Enter a topic to fetch offline events (e.g., 'Russian invasion of Ukraine'):")
+if wiki_topic:
+    try:
+        wiki_summary = wikipedia.summary(wiki_topic, sentences=5)
+        st.markdown(f"**Wikipedia Summary for '{wiki_topic}':**")
+        st.write(wiki_summary)
+    except Exception as e:
+        st.error("Error retrieving Wikipedia data. Please check the topic name.")
+
+# ---------------------------------------------------------------------
+# (f) Semantic Search on Posts using Sentence Transformers
+# ---------------------------------------------------------------------
+st.markdown("## Semantic Search on Posts")
+search_query = st.text_input("Enter your semantic search query:")
+if search_query and text_col in df.columns:
+    @st.cache_data
+    def get_post_embeddings(texts):
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        return model.encode(texts, convert_to_tensor=True)
+    posts = df[text_col].dropna().tolist()
+    embeddings = get_post_embeddings(posts)
+    query_embedding = SentenceTransformer("all-MiniLM-L6-v2").encode(search_query, convert_to_tensor=True)
+    cos_scores = util.cos_sim(query_embedding, embeddings)[0]
+    top_results = cos_scores.topk(5)
+    st.markdown("**Top Matching Posts:**")
+    for score, idx in zip(top_results.values, top_results.indices):
+        st.write(f"Score: {score.item():.3f}")
+        st.write(posts[idx])
+        st.write("---")
 
 # --------------------------------------------------------------------------------
 # ------------------------------- End of Dashboard -------------------------------
