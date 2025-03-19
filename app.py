@@ -1,262 +1,282 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import numpy as np
 import os
 import re
-import requests
-import networkx as nx
 from datetime import datetime
 from textblob import TextBlob
-import wikipedia
+import networkx as nx
 from pyvis.network import Network
 import streamlit.components.v1 as components
 
-# AI/ML Components
+# Transformers & Semantic Search
 from transformers import pipeline
 from sentence_transformers import SentenceTransformer, util
+import wikipedia  # For offline events summary
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.manifold import TSNE
 
 # --------------------------------------------------------------------------------
-# ----------------------- Data Loading & Preparation -----------------------------
+# ----------------------- Data Loading and Normalization -------------------------
 # --------------------------------------------------------------------------------
 @st.cache_data
-def load_and_prepare_data(filepath="data.jsonl"):
-    """Load and normalize data with comprehensive error handling"""
+def load_raw_data(filepath):
+    """Load the newline-delimited JSON file into a Pandas DataFrame."""
     try:
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"Data file not found at {filepath}")
-            
         raw_df = pd.read_json(filepath, lines=True)
-        df = pd.json_normalize(raw_df['data']) if 'data' in raw_df.columns else raw_df
-        
-        # Feature engineering
-        if 'created_utc' in df.columns:
-            df['datetime'] = pd.to_datetime(df['created_utc'], unit='s')
-            df['date'] = df['datetime'].dt.date
-            
-        if 'hashtags' not in df.columns:
-            df['hashtags'] = df.apply(lambda x: re.findall(r"#\w+", f"{x.get('title','')} {x.get('selftext','')}"), axis=1)
-            
-        return df
-    except Exception as e:
-        st.error(f"Data loading failed: {str(e)}")
-        return pd.DataFrame()
+    except ValueError as e:
+        st.error("Error reading the JSONL file. Please check the file format.")
+        raise e
+    return raw_df
 
-df = load_and_prepare_data()
+DATA_PATH = "data.jsonl"
+if not os.path.exists(DATA_PATH):
+    st.error("data.jsonl file not found. Please ensure it is in the same directory as this app.")
+else:
+    raw_df = load_raw_data(DATA_PATH)
 
-# --------------------------------------------------------------------------------
-# ------------------------- AI/ML Model Management -------------------------------
-# --------------------------------------------------------------------------------
-@st.cache_resource
-def load_ai_models():
-    """Load all AI models with safety checks"""
-    models = {}
+st.sidebar.markdown("### Raw Dataset Columns")
+st.sidebar.write(raw_df.columns.tolist())
+
+# Normalize the nested "data" column if present
+if 'data' in raw_df.columns:
     try:
-        models['summarizer'] = pipeline(
-            "summarization", 
-            model="facebook/bart-large-cnn",
-            device=-1  # Force CPU
-        )
-        models['sentence_model'] = SentenceTransformer("all-MiniLM-L6-v2")
-        models['topic_model'] = LatentDirichletAllocation(n_components=5, random_state=42)
-        return models
+        df = pd.json_normalize(raw_df['data'])
     except Exception as e:
-        st.error(f"AI model loading failed: {str(e)}")
-        return None
+        st.error("Error normalizing the 'data' column.")
+        df = raw_df
+else:
+    df = raw_df
 
-models = load_ai_models()
+st.sidebar.markdown("### Normalized Data Columns")
+st.sidebar.write(df.columns.tolist())
 
 # --------------------------------------------------------------------------------
-# ------------------------- Core Visualization Engine ----------------------------
+# ------------------------- Column Mapping (Reddit Data) ---------------------------
 # --------------------------------------------------------------------------------
-def create_time_series_analysis(df):
-    """Generate time series data with moving average"""
+# Typical Reddit fields:
+timestamp_col = "created_utc"  # Unix timestamp (in seconds)
+user_col = "author"            # Author
+
+# For text, prefer "selftext" if available; otherwise, use "title".
+if "selftext" in df.columns and df["selftext"].notnull().sum() > 0:
+    text_col = "selftext"
+elif "title" in df.columns:
+    text_col = "title"
+else:
+    text_col = None
+
+# For hashtags: if not provided, extract from text using regex.
+if "hashtags" not in df.columns:
+    def extract_hashtags(row):
+        text = ""
+        if "title" in row and pd.notnull(row["title"]):
+            text += row["title"] + " "
+        if "selftext" in row and pd.notnull(row["selftext"]):
+            text += row["selftext"]
+        return re.findall(r"#\w+", text)
+    df["hashtags"] = df.apply(extract_hashtags, axis=1)
+hashtags_col = "hashtags"
+
+# Convert Unix timestamp to datetime if available
+if timestamp_col in df.columns:
     try:
-        ts_data = df.groupby('date').size().reset_index(name='count')
-        ts_data['7_day_ma'] = ts_data['count'].rolling(7).mean()
-        return ts_data
+        df[timestamp_col] = pd.to_datetime(df[timestamp_col], unit='s')
     except Exception as e:
-        st.error(f"Time series generation failed: {str(e)}")
-        return pd.DataFrame()
+        st.error(f"Error converting timestamp. Check the format of '{timestamp_col}'.")
 
-def generate_network_graph(df):
-    """Create interactive network graph of hashtag co-occurrence"""
+# --------------------------------------------------------------------------------
+# --------------------------- Sidebar: Filters & Platform --------------------------
+# --------------------------------------------------------------------------------
+st.sidebar.header("Filters & Platform")
+
+# Platform Selector (simulate multiple platforms)
+platform = st.sidebar.selectbox("Select Platform", ["Reddit", "Twitter", "Facebook"])
+if platform != "Reddit":
+    st.sidebar.info(f"Data for {platform} is not available. Showing Reddit data.")
+
+# Date Filter
+if timestamp_col in df.columns:
     try:
-        hashtags = df['hashtags'].explode().str.lower()
-        co_occur = pd.DataFrame(
-            index=hashtags.unique(),
-            columns=hashtags.unique(),
-            data=0
-        )
-
-        for tags in df['hashtags']:
-            unique_tags = list(set([t.lower() for t in tags]))
-            for i in range(len(unique_tags)):
-                for j in range(i+1, len(unique_tags)):
-                    co_occur.loc[unique_tags[i], unique_tags[j]] += 1
-                    co_occur.loc[unique_tags[j], unique_tags[i]] += 1
-
-        G = nx.Graph()
-        for tag in co_occur.columns:
-            G.add_node(tag)
-            
-        for i in range(len(co_occur.columns)):
-            for j in range(i+1, len(co_occur.columns)):
-                if co_occur.iloc[i, j] > 0:
-                    G.add_edge(
-                        co_occur.columns[i],
-                        co_occur.columns[j],
-                        weight=co_occur.iloc[i, j]
-                    )
-
-        net = Network(height="600px", width="100%", bgcolor="#222222", font_color="white")
-        net.from_nx(G)
-        return net
+        min_date = df[timestamp_col].min().date()
+        max_date = df[timestamp_col].max().date()
+        start_date = st.sidebar.date_input("Start date", min_date, min_value=min_date, max_value=max_date)
+        end_date = st.sidebar.date_input("End date", max_date, min_value=min_date, max_value=max_date)
+        if start_date > end_date:
+            st.sidebar.error("Error: End date must fall after start date.")
+        df = df[(df[timestamp_col].dt.date >= start_date) & (df[timestamp_col].dt.date <= end_date)]
     except Exception as e:
-        st.error(f"Network graph failed: {str(e)}")
-        return None
+        st.sidebar.error("Error processing the timestamp column for filtering.")
+else:
+    st.sidebar.info(f"No '{timestamp_col}' column found for filtering by date.")
+
+# Keyword/Hashtag Search
+search_term = st.sidebar.text_input("Search for a keyword/hashtag:")
+if search_term:
+    if text_col in df.columns:
+        df = df[df[text_col].str.contains(search_term, case=False, na=False)]
+    st.sidebar.markdown(f"### Showing results for '{search_term}'")
 
 # --------------------------------------------------------------------------------
-# ------------------------- Intelligent Analysis Modules -------------------------
+# ------------------------- Main Dashboard: Basic Visualizations -----------------
 # --------------------------------------------------------------------------------
-def generate_ai_summary(text):
-    """Safe text summarization with dynamic length handling"""
-    try:
-        if not models or not text:
-            return "Summary unavailable"
-            
-        words = text.split()
-        max_len = max(15, min(len(words), 50))
-        return models['summarizer'](
-            text,
-            max_length=max_len,
-            min_length=int(max_len*0.5),
-            do_sample=False
-        )[0]['summary_text']
-    except Exception as e:
-        return f"Summary error: {str(e)}"
-
-def perform_topic_modeling(texts):
-    """Topic modeling with LDA and t-SNE visualization"""
-    try:
-        vectorizer = CountVectorizer(stop_words='english', max_features=1000)
-        X = vectorizer.fit_transform(texts)
-        lda_output = models['topic_model'].fit_transform(X)
-        tsne = TSNE(n_components=2, random_state=42)
-        return tsne.fit_transform(lda_output)
-    except Exception as e:
-        st.error(f"Topic modeling failed: {str(e)}")
-        return None
-
-# --------------------------------------------------------------------------------
-# ------------------------- Main Application Interface ---------------------------
-# --------------------------------------------------------------------------------
-st.title("Advanced Social Media Analytics Platform")
+st.title("Social Media Data Analysis Dashboard")
 st.markdown("""
-Multi-dimensional analysis of social media data with AI-powered insights and network visualization.
+This dashboard visualizes Reddit data, showcasing trends over time, key contributors, topic embeddings, and more.
 """)
 
-# Sidebar Controls
-with st.sidebar:
-    st.header("Data Controls")
-    date_filter = st.date_input("Select Date Range", 
-        value=(df['date'].min(), df['date'].max()) if 'date' in df.columns else None)
-    
-    search_term = st.text_input("Keyword/Hashtag Filter")
-    if search_term:
-        df = df[df['text'].str.contains(search_term, case=False, na=False)]
-
-# Core Metrics
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Total Posts", len(df))
-with col2:
-    st.metric("Unique Users", df['author'].nunique() if 'author' in df.columns else "N/A")
-with col3:
-    st.metric("Avg. Sentiment", f"{df['sentiment'].mean():.2f}" if 'sentiment' in df.columns else "N/A")
-
-# Time Series Analysis
-st.header("Temporal Analysis")
-ts_data = create_time_series_analysis(df)
-if not ts_data.empty:
-    fig = px.line(ts_data, x='date', y=['count', '7_day_ma'], 
-                 title="Post Volume with 7-Day Moving Average")
-    st.plotly_chart(fig)
-    
-    # AI Summary
-    summary_text = f"""
-        From {ts_data['date'].min()} to {ts_data['date'].max()}, 
-        average posts per day: {ts_data['count'].mean():.1f}. 
-        Peak activity: {ts_data.loc[ts_data['count'].idxmax()]['date']} 
-        ({ts_data['count'].max()} posts).
-    """
-    st.subheader("AI-Powered Trend Summary")
-    st.write(generate_ai_summary(summary_text))
-
-# Network Visualization
-st.header("Hashtag Network Analysis")
-if not df['hashtags'].empty:
-    net = generate_network_graph(df)
-    if net:
-        net.save_graph("network.html")
-        components.html(open("network.html", "r").read(), height=800)
+# Summary Metrics
+total_posts = len(df)
+st.markdown("### Summary Metrics")
+st.write("**Total Posts:**", total_posts)
+if user_col in df.columns:
+    unique_users = df[user_col].nunique()
+    st.write("**Unique Users:**", unique_users)
 else:
-    st.info("No hashtag data available for network analysis")
+    st.write("**Unique Users:** Data not available")
 
-# Topic Modeling
-st.header("Content Topic Modeling")
-if 'text' in df.columns:
-    sample_texts = df['text'].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
-    tsne_results = perform_topic_modeling(sample_texts)
-    if tsne_results is not None:
-        tsne_df = pd.DataFrame(tsne_results, columns=['X', 'Y'])
-        tsne_df['Text'] = sample_texts
-        fig = px.scatter(tsne_df, x='X', y='Y', hover_data=['Text'],
-                        title="t-SNE Visualization of Topic Clusters")
-        st.plotly_chart(fig)
+# Time Series Plot with 7-day Moving Average
+if timestamp_col in df.columns:
+    st.markdown("### Posts Over Time with Moving Average")
+    df["date"] = df[timestamp_col].dt.date
+    time_series = df.groupby("date").size().reset_index(name="count")
+    time_series["7-day Moving Avg"] = time_series["count"].rolling(window=7).mean()
+    fig_time = px.line(time_series, x="date", y=["count", "7-day Moving Avg"],
+                       labels={"date": "Date", "value": "Number of Posts"},
+                       title="Posts Over Time with 7-day Moving Average")
+    st.plotly_chart(fig_time)
+else:
+    st.info("No timestamp data available for time series plot.")
 
-# Wikipedia Integration
-st.header("Real-world Event Context")
-wiki_query = st.text_input("Enter event/search term for Wikipedia context:")
-if wiki_query:
+# Pie Chart of Top Contributors (using subreddit if available, otherwise author)
+community_col = "subreddit" if "subreddit" in df.columns else user_col
+if community_col in df.columns:
+    st.markdown("### Top Communities/Accounts Contributions")
+    contributions = df[community_col].value_counts().reset_index()
+    contributions.columns = [community_col, "count"]
+    top_contributions = contributions.head(10)
+    fig_pie = px.pie(top_contributions, values="count", names=community_col,
+                     title="Top 10 Contributors")
+    st.plotly_chart(fig_pie)
+else:
+    st.info("No community or account data available for contributor pie chart.")
+
+# Top Hashtags Bar Chart
+if hashtags_col in df.columns:
+    st.markdown("### Top Hashtags")
+    hashtags_exploded = df.explode(hashtags_col)
+    hashtags_exploded = hashtags_exploded[hashtags_exploded[hashtags_col] != ""]
+    top_hashtags = hashtags_exploded[hashtags_col].value_counts().reset_index()
+    top_hashtags.columns = ['hashtag', 'count']
+    if not top_hashtags.empty:
+        fig_hashtags = px.bar(top_hashtags.head(10), x='hashtag', y='count',
+                              labels={'hashtag': 'Hashtag', 'count': 'Frequency'},
+                              title="Top 10 Hashtags")
+        st.plotly_chart(fig_hashtags)
+    else:
+        st.info("No hashtag data available.")
+else:
+    st.info("No 'hashtags' column found in the dataset.")
+
+# Sentiment Analysis on Text Data
+if text_col is not None and text_col in df.columns:
+    st.markdown("### Sentiment Analysis")
+    df['sentiment'] = df[text_col].apply(lambda x: TextBlob(x).sentiment.polarity if isinstance(x, str) else 0)
+    fig_sentiment = px.histogram(df, x='sentiment', nbins=30,
+                                 labels={'sentiment': 'Sentiment Polarity'},
+                                 title="Sentiment Polarity Distribution")
+    st.plotly_chart(fig_sentiment)
+else:
+    st.info(f"No '{text_col}' column available for sentiment analysis.")
+
+# --------------------------------------------------------------------------------
+# ---------------------------- Compulsory Features -------------------------------
+# --------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
+# (a) Topic Embedding Visualization using LDA + TSNE
+# ---------------------------------------------------------------------
+st.markdown("## Topic Embedding Visualization")
+if text_col in df.columns:
+    texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
+    vectorizer = CountVectorizer(stop_words='english', max_features=1000)
+    X = vectorizer.fit_transform(texts)
+    lda = LatentDirichletAllocation(n_components=5, random_state=42)
+    topic_matrix = lda.fit_transform(X)
+    dominant_topic = topic_matrix.argmax(axis=1)
+    tsne_model = TSNE(n_components=2, random_state=42)
+    tsne_values = tsne_model.fit_transform(topic_matrix)
+    tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
+    tsne_df["Dominant Topic"] = dominant_topic.astype(str)
+    fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
+                            title="TSNE Embedding of Topics")
+    st.plotly_chart(fig_topics)
+else:
+    st.info("No text data available for topic embedding.")
+
+# ---------------------------------------------------------------------
+# (b) GenAI Summary for Time Series Plot
+# ---------------------------------------------------------------------
+# st.markdown("## GenAI Summary for Time Series")
+# if not time_series.empty:
+#     start = time_series["date"].min()
+#     end = time_series["date"].max()
+#     avg_posts = time_series["count"].mean()
+#     peak = time_series.loc[time_series["count"].idxmax()]
+#     description = (f"From {start} to {end}, the average number of posts per day was {avg_posts:.1f}. "
+#                    f"The highest activity was on {peak['date']} with {peak['count']} posts.")
+#     st.write("Time Series Description:")
+#     st.write(description)
+#     ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+#     try:
+#         ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
+#         st.markdown("**GenAI Summary:**")
+#         st.write(ts_summary)
+#     except Exception as e:
+#         st.error("Error generating time series summary.")
+# else:
+#     st.info("Time series data not available for summarization.")
+
+# ---------------------------------------------------------------------
+# (d) Offline Events from Wikipedia for a Given Topic
+# ---------------------------------------------------------------------
+st.markdown("## Offline Events from Wikipedia")
+wiki_topic = st.text_input("Enter a topic to fetch offline events (e.g., 'Russian invasion of Ukraine'):")
+if wiki_topic:
     try:
-        with st.spinner("Fetching relevant context..."):
-            result = wikipedia.summary(wiki_query, sentences=3, auto_suggest=False)
-            st.markdown(f"**Wikipedia Context for {wiki_query}:**")
-            st.write(result)
-    except wikipedia.exceptions.DisambiguationError as e:
-        st.error(f"Ambiguous term: {e.options[:3]}")
+        wiki_summary = wikipedia.summary(wiki_topic, sentences=5)
+        st.markdown(f"**Wikipedia Summary for '{wiki_topic}':**")
+        st.write(wiki_summary)
     except Exception as e:
-        st.error(f"Context fetch failed: {str(e)}")
+        st.error("Error retrieving Wikipedia data. Please check the topic name.")
 
-# Semantic Search
-st.header("Semantic Content Search")
-if models and 'text' in df.columns:
-    search_query = st.text_input("Search posts by semantic meaning:")
-    if search_query:
-        with st.spinner("Finding relevant content..."):
-            embeddings = models['sentence_model'].encode(df['text'].tolist())
-            query_embed = models['sentence_model'].encode(search_query)
-            scores = util.cos_sim(query_embed, embeddings)[0]
-            top_indices = scores.topk(3).indices
-            
-            st.subheader("Most Relevant Posts")
-            for idx in top_indices:
-                st.write(f"**Relevance Score:** {scores[idx]:.2f}")
-                st.write(df.iloc[idx]['text'])
-                st.divider()
+# ---------------------------------------------------------------------
+# (f) Semantic Search on Posts using Sentence Transformers
+# ---------------------------------------------------------------------
+st.markdown("## Semantic Search on Posts")
+search_query = st.text_input("Enter your semantic search query:")
+if search_query and text_col in df.columns:
+    @st.cache_data
+    def get_post_embeddings(texts):
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        return model.encode(texts, convert_to_tensor=True)
+    posts = df[text_col].dropna().tolist()
+    embeddings = get_post_embeddings(posts)
+    query_embedding = SentenceTransformer("all-MiniLM-L6-v2").encode(search_query, convert_to_tensor=True)
+    cos_scores = util.cos_sim(query_embedding, embeddings)[0]
+    top_results = cos_scores.topk(5)
+    st.markdown("**Top Matching Posts:**")
+    for score, idx in zip(top_results.values, top_results.indices):
+        st.write(f"Score: {score.item():.3f}")
+        st.write(posts[idx])
+        st.write("---")
 
 # --------------------------------------------------------------------------------
-# ------------------------- System Monitoring Footer -----------------------------
+# ------------------------------- End of Dashboard -------------------------------
 # --------------------------------------------------------------------------------
-st.markdown("---")
-st.caption("""
-System Status: 
-- AI Models Loaded: ✅
-- Data Freshness: {} 
-- Analysis Coverage: {:.1f}%
-""".format(df['date'].max() if 'date' in df.columns else "N/A", 
-         (len(df)/len(raw_df)*100 if 'raw_df' in locals() else 100))
+st.markdown("### End of Dashboard")
+st.markdown("""
+This dashboard is a prototype implementation for analyzing Reddit social media data.  
+It demonstrates advanced trend analysis, contributor insights, topic embeddings, GenAI summaries, offline event linking, and semantic search functionality.
+""")
