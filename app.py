@@ -203,24 +203,24 @@ show_semantic_search = st.sidebar.checkbox("Semantic Search on Posts")
 # ---------------------------------------------------------------------
 # (a) Topic Embedding Visualization using LDA + TSNE
 # ---------------------------------------------------------------------
-if show_topic_embedding:
-    st.markdown("## Topic Embedding Visualization")
-    if text_col in df.columns:
-        texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
-        vectorizer = CountVectorizer(stop_words='english', max_features=1000)
-        X = vectorizer.fit_transform(texts)
-        lda = LatentDirichletAllocation(n_components=5, random_state=42)
-        topic_matrix = lda.fit_transform(X)
-        dominant_topic = topic_matrix.argmax(axis=1)
-        tsne_model = TSNE(n_components=2, random_state=42)
-        tsne_values = tsne_model.fit_transform(topic_matrix)
-        tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
-        tsne_df["Dominant Topic"] = dominant_topic.astype(str)
-        fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
-                                title="TSNE Embedding of Topics")
-        st.plotly_chart(fig_topics)
-    else:
-        st.info("No text data available for topic embedding.")
+# if show_topic_embedding:
+#     st.markdown("## Topic Embedding Visualization")
+#     if text_col in df.columns:
+#         texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
+#         vectorizer = CountVectorizer(stop_words='english', max_features=1000)
+#         X = vectorizer.fit_transform(texts)
+#         lda = LatentDirichletAllocation(n_components=5, random_state=42)
+#         topic_matrix = lda.fit_transform(X)
+#         dominant_topic = topic_matrix.argmax(axis=1)
+#         tsne_model = TSNE(n_components=2, random_state=42)
+#         tsne_values = tsne_model.fit_transform(topic_matrix)
+#         tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
+#         tsne_df["Dominant Topic"] = dominant_topic.astype(str)
+#         fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
+#                                 title="TSNE Embedding of Topics")
+#         st.plotly_chart(fig_topics)
+#     else:
+#         st.info("No text data available for topic embedding.")
 
 # ---------------------------------------------------------------------
 # (b) GenAI Summary for Time Series Plot
