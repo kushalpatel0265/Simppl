@@ -218,25 +218,25 @@ else:
 # ---------------------------------------------------------------------
 # (b) GenAI Summary for Time Series Plot
 # ---------------------------------------------------------------------
-st.markdown("## GenAI Summary for Time Series")
-if not time_series.empty:
-    start = time_series["date"].min()
-    end = time_series["date"].max()
-    avg_posts = time_series["count"].mean()
-    peak = time_series.loc[time_series["count"].idxmax()]
-    description = (f"From {start} to {end}, the average number of posts per day was {avg_posts:.1f}. "
-                   f"The highest activity was on {peak['date']} with {peak['count']} posts.")
-    st.write("Time Series Description:")
-    st.write(description)
-    ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-    try:
-        ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
-        st.markdown("**GenAI Summary:**")
-        st.write(ts_summary)
-    except Exception as e:
-        st.error("Error generating time series summary.")
-else:
-    st.info("Time series data not available for summarization.")
+# st.markdown("## GenAI Summary for Time Series")
+# if not time_series.empty:
+#     start = time_series["date"].min()
+#     end = time_series["date"].max()
+#     avg_posts = time_series["count"].mean()
+#     peak = time_series.loc[time_series["count"].idxmax()]
+#     description = (f"From {start} to {end}, the average number of posts per day was {avg_posts:.1f}. "
+#                    f"The highest activity was on {peak['date']} with {peak['count']} posts.")
+#     st.write("Time Series Description:")
+#     st.write(description)
+#     ts_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+#     try:
+#         ts_summary = ts_summarizer(description, max_length=80, min_length=40, do_sample=False)[0]['summary_text']
+#         st.markdown("**GenAI Summary:**")
+#         st.write(ts_summary)
+#     except Exception as e:
+#         st.error("Error generating time series summary.")
+# else:
+#     st.info("Time series data not available for summarization.")
 
 # ---------------------------------------------------------------------
 # (d) Offline Events from Wikipedia for a Given Topic
