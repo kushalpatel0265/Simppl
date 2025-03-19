@@ -165,20 +165,20 @@ if text_col is not None and text_col in df.columns:
     st.plotly_chart(fig_sentiment)
 
 # Topic modeling visualization
-if text_col in df.columns:
-    st.markdown("## Topic Embedding Visualization")
-    texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
-    vectorizer = CountVectorizer(stop_words='english', max_features=1000)
-    X = vectorizer.fit_transform(texts)
-    lda = LatentDirichletAllocation(n_components=5, random_state=42)
-    topic_matrix = lda.fit_transform(X)
-    dominant_topic = topic_matrix.argmax(axis=1)
-    tsne_model = TSNE(n_components=2, random_state=42)
-    tsne_values = tsne_model.fit_transform(topic_matrix)
-    tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
-    tsne_df["Dominant Topic"] = dominant_topic.astype(str)
-    fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
-                            title="Topic Clusters")
-    st.plotly_chart(fig_topics)
+# if text_col in df.columns:
+#     st.markdown("## Topic Embedding Visualization")
+#     texts = df[text_col].dropna().sample(n=min(500, len(df)), random_state=42).tolist()
+#     vectorizer = CountVectorizer(stop_words='english', max_features=1000)
+#     X = vectorizer.fit_transform(texts)
+#     lda = LatentDirichletAllocation(n_components=5, random_state=42)
+#     topic_matrix = lda.fit_transform(X)
+#     dominant_topic = topic_matrix.argmax(axis=1)
+#     tsne_model = TSNE(n_components=2, random_state=42)
+#     tsne_values = tsne_model.fit_transform(topic_matrix)
+#     tsne_df = pd.DataFrame(tsne_values, columns=["x", "y"])
+#     tsne_df["Dominant Topic"] = dominant_topic.astype(str)
+#     fig_topics = px.scatter(tsne_df, x="x", y="y", color="Dominant Topic",
+#                             title="Topic Clusters")
+#     st.plotly_chart(fig_topics)
 
 st.markdown("### End of Dashboard")
