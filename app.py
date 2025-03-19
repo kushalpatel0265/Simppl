@@ -225,42 +225,78 @@ else:
     st.info("No text data available for topic embedding.")
 
 # GenAI Time Series Summary
+@st.cache_resource(show_spinner="Loading AI Model...")
+def load_summarizer():
+    """Load summarization model with error handling"""
+    try:
+        return pipeline(
+            "summarization",
+            model="facebook/bart-large-cnn",
+            min_length=10,  # Set safe minimum length
+            max_length=100  # Set safe maximum length
+        )
+    except Exception as e:
+        st.error(f"Failed to load AI model: {str(e)}")
+        return None
+
+def generate_ai_summary(description):
+    """Generate summary with multiple fallback mechanisms"""
+    try:
+        # Validate input length
+        if len(description.split()) < 10:
+            raise ValueError("Insufficient content for summarization")
+            
+        summarizer = load_summarizer()
+        if summarizer is None:
+            return None
+            
+        return summarizer(description, do_sample=False)[0]['summary_text']
+        
+    except IndexError:
+        return "Summary generation failed: Unexpected model output"
+    except ValueError as ve:
+        return f"Summary unavailable: {str(ve)}"
+    except Exception as e:
+        return f"Summary generation error: {str(e)}"
+
+# --------------------------------------------------------------------------------
+# ------------------------- Updated Time Series Summary Section ------------------
+# --------------------------------------------------------------------------------
 st.markdown("## GenAI Time Series Summary")
 if not time_series.empty:
     try:
-        # Generate description
+        # Generate base statistics
         start = time_series["date"].min()
         end = time_series["date"].max()
         avg_posts = time_series["count"].mean()
         peak = time_series.loc[time_series["count"].idxmax()]
-        description = (f"From {start} to {end}, average posts/day: {avg_posts:.1f}. "
-                      f"Peak activity: {peak['date']} ({peak['count']} posts).")
-
-        # Initialize summarizer with caching
-        @st.cache_resource
-        def load_summarizer():
-            return pipeline("summarization", model="facebook/bart-large-cnn")
         
-        # Generate summary
-        summarizer = load_summarizer()
-        ts_summary = summarizer(
-            description,
-            max_length=80,
-            min_length=40,
-            do_sample=False
-        )[0]['summary_text']
+        # Create safe description
+        base_description = (
+            f"From {start} to {end}, average posts per day: {avg_posts:.1f}. "
+            f"Peak activity: {peak['date']} ({peak['count']} posts). "
+            f"Total posts in period: {time_series['count'].sum()}."
+        )
         
-        st.markdown("**AI-Generated Summary:**")
-        st.write(ts_summary)
-        st.markdown("**Original Statistics:**")
-        st.write(description)
-
+        # Generate AI summary
+        ai_summary = generate_ai_summary(base_description)
+        
+        # Display results
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**AI Analysis**")
+            st.write(ai_summary if ai_summary else "Summary unavailable - showing statistics")
+        with col2:
+            st.markdown("**Raw Statistics**")
+            st.write(base_description)
+            
     except Exception as e:
-        st.error(f"Failed to generate AI summary: {str(e)}")
-        st.markdown("**Fallback Statistics:**")
-        st.write(description)
+        st.error(f"Critical failure in summary generation: {str(e)}")
+        st.write("**Emergency Statistics Fallback**")
+        st.write(f"Total posts: {len(df)}, Date range: {start} to {end}")
 else:
     st.info("No time series data available for summarization")
+
 
 # Wikipedia Integration
 st.markdown("## Offline Events from Wikipedia")
